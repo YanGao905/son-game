@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>闯关游戏 · 第五关</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #c8b89a;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  min-height: 100vh;
+  font-family: 'Courier New', monospace;
+}
+#ui {
+  color: #3a2a1a;
+  margin-bottom: 8px;
+  font-size: 13px;
+  display: flex; gap: 16px; align-items: center;
+  font-family: 'Courier New', monospace;
+}
+#ui-left { display: flex; gap: 16px; align-items: center; }
+#level-label {
+  font-weight: bold; color: #5a3010;
+  background: rgba(245,240,220,0.7);
+  border: 1px solid #3a2a1a;
+  padding: 2px 8px;
+}
+#level4-link {
+  font-size: 12px; color: #3a2a1a;
+  background: rgba(245,240,220,0.7);
+  border: 1px solid #3a2a1a;
+  padding: 2px 8px; cursor: pointer;
+  text-decoration: none; font-family: 'Courier New', monospace;
+}
+#level4-link:hover { background: #ffe0a0; }
+#inventory {
+  font-size: 12px; color: #3a2a1a;
+  background: rgba(245,240,220,0.7);
+  border: 1px solid #3a2a1a;
+  padding: 2px 10px; min-width: 90px;
+}
+#canvas-wrap {
+  position: relative;
+  box-shadow: 4px 4px 18px rgba(0,0,0,0.4);
+}
+canvas { display: block; }
+#overlay {
+  position: absolute; inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 10;
+  background: rgba(245,240,224,0.82);
+}
+#overlay-msg {
+  font-size: 38px; font-weight: bold;
+  color: #3a2a1a;
+  text-shadow: 2px 2px 0 #fff, -1px -1px 0 #fff;
+  font-family: 'Courier New', monospace;
+}
+#restart-btn {
+  margin-top: 18px; padding: 10px 28px;
+  font-size: 15px; font-family: 'Courier New', monospace;
+  background: #f5f0e8; border: 2px solid #3a2a1a;
+  cursor: pointer; color: #3a2a1a; font-weight: bold;
+  pointer-events: all; box-shadow: 3px 3px 0 #3a2a1a; display: none;
+}
+#restart-btn:hover { background: #ffe0a0; }
+#level4-btn {
+  margin-top: 10px; padding: 8px 22px;
+  font-size: 13px; font-family: 'Courier New', monospace;
+  background: #f5f0e8; border: 2px solid #3a2a1a;
+  cursor: pointer; color: #3a2a1a; pointer-events: all;
+  box-shadow: 3px 3px 0 #3a2a1a; display: none; text-decoration: none;
+}
+#level4-btn:hover { background: #ffe0a0; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="ui-left">
+    <span id="level-label">✏️ 无重力闯关 · 第五关</span>
+    <a id="level4-link" href="game-level4.html">← 第四关</a>
+    <span>WASD / 方向键 移动 &nbsp;|&nbsp; 靠近物品按 <b>E</b> 拾取/使用</span>
+  </div>
+  <span id="timer-display">⏱ 00:00</span>
+  <span id="inventory">背包：空</span>
+</div>
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <div id="overlay-msg"></div>
+    <button id="restart-btn" onclick="restartGame()">重新开始</button>
+    <a id="level4-btn" href="game-level4.html">← 返回第四关</a>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+//  CANVAS SETUP
+// ─────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+const W = 900, H = 560;
+canvas.width  = W;
+canvas.height = H;
+
+// ─────────────────────────────────────────────────────────────────
+//  SKETCH HELPERS
+// ─────────────────────────────────────────────────────────────────
+function sketchLine(x1,y1,x2,y2,passes=2){
+  for(let p=0;p<passes;p++){
+    const j=()=>(Math.random()-0.5)*1.4;
+    ctx.beginPath(); ctx.moveTo(x1+j(),y1+j()); ctx.lineTo(x2+j(),y2+j()); ctx.stroke();
+  }
+}
+function sketchRect(x,y,w,h,passes=2){
+  sketchLine(x,y,x+w,y,passes); sketchLine(x+w,y,x+w,y+h,passes);
+  sketchLine(x+w,y+h,x,y+h,passes); sketchLine(x,y+h,x,y,passes);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  PAPER TEXTURE
+// ─────────────────────────────────────────────────────────────────
+const paperCanvas = document.createElement('canvas');
+paperCanvas.width=W; paperCanvas.height=H;
+const pctx=paperCanvas.getContext('2d');
+pctx.fillStyle='#f5f0e0'; pctx.fillRect(0,0,W,H);
+pctx.strokeStyle='rgba(150,180,220,0.35)'; pctx.lineWidth=0.8;
+for(let y=30;y<H;y+=28){ pctx.beginPath(); pctx.moveTo(0,y); pctx.lineTo(W,y); pctx.stroke(); }
+pctx.strokeStyle='rgba(220,130,130,0.4)'; pctx.lineWidth=1;
+pctx.beginPath(); pctx.moveTo(55,0); pctx.lineTo(55,H); pctx.stroke();
+for(let i=0;i<4000;i++){
+  const x=Math.random()*W,y=Math.random()*H;
+  pctx.fillStyle=`rgba(120,80,40,${Math.random()*0.06})`; pctx.fillRect(x,y,1,1);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────────────────────────
+const WALL=10;
+let keys={}, particles=[], lastTime=0;
+let hintMsg='', hintTimer=0;
+
+function initState(){
+  return {
+    elapsed: 0,
+
+    player: { x:30, y:H-WALL-25, r:9, dead:false, won:false, deathTimer:0, hasAxe:false },
+
+    // 斧头：左下区，被旋转叶片守护
+    axe: { x:200, y:390, r:18, picked:false },
+
+    // 电箱：右下角，被旋转臂和壁刺夹击
+    electricBox: { x:812, y:300, w:46, h:55, smashed:false, glowTimer:0 },
+
+    // 电流主屏障：通电时固体+致命，断电后消失
+    electricBarrier: { x:WALL, y:248, w:W-2*WALL, h:16, glowTimer:0 },
+
+    // ── 底部区域障碍 ──────────────────────────────
+    // 4 个旋转臂，覆盖全底部区域
+    rotatingArms: [
+      { x:190, y:340, len:100, width:13, angle:0,           speed: 0.014 },
+      { x:420, y:470, len: 92, width:12, angle:Math.PI*0.6, speed:-0.017 },
+      { x:620, y:370, len: 95, width:12, angle:Math.PI*1.3, speed: 0.015 },
+      { x:760, y:470, len: 80, width:11, angle:Math.PI*0.3, speed:-0.020 },
+    ],
+
+    // 3 个旋转叶片
+    blades: [
+      { x:300, y:400, armR:32, angle:0,           angSpeed: 0.072 },  // 守斧头右侧
+      { x:500, y:430, armR:28, angle:Math.PI/4,   angSpeed:-0.075 },
+      { x:680, y:310, armR:30, angle:Math.PI*0.8, angSpeed: 0.065 },  // 守电箱左侧
+    ],
+
+    // 脉冲电区（底部额外电击，独立于主屏障）
+    pulseZones: [
+      { x:WALL,  y:460, w:340,        h:18, timer:0.0, period:2.2, duty:0.50, on:false },
+      { x:460,   y:320, w:W-WALL-460, h:18, timer:0.9, period:1.8, duty:0.48, on:false },
+      { x:120,   y:290, w:280,        h:18, timer:1.5, period:2.6, duty:0.45, on:false },
+    ],
+
+    // 壁刺：左右各一组
+    wallSpikes: [
+      { x:WALL+8,   y:380, dir:'right', count:5, spikeLen:40, baseW:8, extended:false, timer:0.0, period:2.2, duty:0.44 },
+      { x:W-WALL-8, y:420, dir:'left',  count:5, spikeLen:40, baseW:8, extended:false, timer:1.1, period:2.0, duty:0.46 },
+      { x:W-WALL-8, y:280, dir:'left',  count:4, spikeLen:36, baseW:8, extended:false, timer:0.4, period:2.4, duty:0.42 },
+    ],
+
+    // 局部地板尖刺（右半区，守住通往电箱的路）
+    floorSpikes: buildFloorSpikes(),
+
+    // ── 顶部区域（断电后）──────────────────────────
+    // 2 个上下移动的齿轮，比第四关更难绕
+    topGears: [
+      { x:320, y:130, outerR:50, teeth:12, angle:0, angSpeed:0.020,
+        moveAxis:'y', basePos:130, moveRange:160, moveSpeed:1.6, phase:0,
+        railTop:WALL+8, railBottom:248-8 },
+      { x:610, y:120, outerR:44, teeth:10, angle:Math.PI/3, angSpeed:-0.024,
+        moveAxis:'y', basePos:120, moveRange:140, moveSpeed:1.9, phase:2.1,
+        railTop:WALL+8, railBottom:248-8 },
+    ],
+    // 顶部旋转臂
+    topArm: { x:460, y:180, len:90, width:12, angle:Math.PI*0.5, speed:0.013 },
+    // 顶部右侧壁刺
+    topWallSpike: { x:W-WALL-8, y:130, dir:'left', count:4, spikeLen:38, baseW:8, extended:false, timer:0.6, period:2.0, duty:0.46 },
+
+    startBox: { x:WALL,      y:H-WALL-40, w:40, h:40 },
+    endBox:   { x:W-WALL-40, y:WALL,      w:40, h:40 },
+    powerOff: false,
+  };
+}
+
+function buildFloorSpikes(){
+  const spikes=[];
+  const SPIKE_W=18;
+  // 右半区地板：x=500~880，跳过电箱下方宽50的区域
+  for(let x=500;x<870;x+=SPIKE_W){
+    const cx=x+SPIKE_W/2;
+    if(cx>808 && cx<858) continue; // 电箱正下方留小空隙
+    spikes.push({ x:cx, y:H-WALL });
+  }
+  return spikes;
+}
+
+let S=initState();
+
+// ─────────────────────────────────────────────────────────────────
+//  INPUT
+// ─────────────────────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{ keys[e.key]=true; e.preventDefault(); });
+document.addEventListener('keyup',  e=>{ keys[e.key]=false; });
+function inputDir(){
+  const SPD=3.0; let dx=0,dy=0;
+  if(keys['ArrowLeft'] ||keys['a']||keys['A']) dx-=SPD;
+  if(keys['ArrowRight']||keys['d']||keys['D']) dx+=SPD;
+  if(keys['ArrowUp']   ||keys['w']||keys['W']) dy-=SPD;
+  if(keys['ArrowDown'] ||keys['s']||keys['S']) dy+=SPD;
+  return {dx,dy};
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  COLLISION
+// ─────────────────────────────────────────────────────────────────
+function circleRect(cx,cy,cr,rx,ry,rw,rh){
+  const nx=Math.max(rx,Math.min(cx,rx+rw));
+  const ny=Math.max(ry,Math.min(cy,ry+rh));
+  return (cx-nx)**2+(cy-ny)**2<cr*cr;
+}
+function circleLine(cx,cy,cr,x1,y1,x2,y2){
+  const ddx=x2-x1,ddy=y2-y1;
+  const t=Math.max(0,Math.min(1,((cx-x1)*ddx+(cy-y1)*ddy)/(ddx*ddx+ddy*ddy)));
+  const px=x1+t*ddx,py=y1+t*ddy;
+  return (cx-px)**2+(cy-py)**2<cr*cr;
+}
+function pushOut(p,rx,ry,rw,rh){
+  if(!circleRect(p.x,p.y,p.r,rx,ry,rw,rh)) return;
+  const cx=rx+rw/2,cy=ry+rh/2;
+  const ox=(rw/2+p.r)-Math.abs(p.x-cx);
+  const oy=(rh/2+p.r)-Math.abs(p.y-cy);
+  if(ox<oy) p.x+=ox*Math.sign(p.x-cx);
+  else      p.y+=oy*Math.sign(p.y-cy);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  PARTICLES
+// ─────────────────────────────────────────────────────────────────
+const PCOLORS=['#c0392b','#e67e22','#8e44ad','#2c3e50'];
+function burst(x,y,col){
+  for(let i=0;i<22;i++){
+    const a=Math.random()*Math.PI*2,sp=1.5+Math.random()*5;
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+      life:1,decay:0.02+Math.random()*0.025,
+      r:2+Math.random()*5,color:col||PCOLORS[Math.floor(Math.random()*4)]});
+  }
+}
+function sparkBurst(x,y){
+  for(let i=0;i<45;i++){
+    const a=Math.random()*Math.PI*2,sp=1.5+Math.random()*9;
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+      life:1,decay:0.010+Math.random()*0.022,
+      r:1+Math.random()*4,
+      color:i%3===0?'#f1c40f':i%3===1?'#3498db':'#ecf0f1'});
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  UPDATE
+// ─────────────────────────────────────────────────────────────────
+function update(dt){
+  S.elapsed+=dt;
+  const sec=Math.floor(S.elapsed);
+  document.getElementById('timer-display').textContent=
+    `⏱ ${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+
+  if(hintTimer>0) hintTimer-=dt;
+
+  S.electricBox.glowTimer+=dt;
+  S.electricBarrier.glowTimer+=dt;
+
+  // 脉冲区计时
+  S.pulseZones.forEach(pz=>{ pz.timer+=dt; pz.on=(pz.timer%pz.period)<pz.period*pz.duty; });
+
+  // 底部旋转臂 & 叶片
+  S.rotatingArms.forEach(a=>{ a.angle+=a.speed; });
+  S.blades.forEach(b=>{ b.angle+=b.angSpeed; });
+
+  // 壁刺
+  S.wallSpikes.forEach(ws=>{ ws.timer+=dt; ws.extended=(ws.timer%ws.period)<ws.period*ws.duty; });
+  S.topWallSpike.timer=(S.topWallSpike.timer||0)+dt;
+  S.topWallSpike.extended=(S.topWallSpike.timer%S.topWallSpike.period)<S.topWallSpike.period*S.topWallSpike.duty;
+
+  // 顶部齿轮（移动 + 旋转）
+  S.topGears.forEach(g=>{
+    g.angle+=g.angSpeed;
+    g.phase+=g.moveSpeed*dt;
+    g.y=g.basePos+Math.sin(g.phase)*g.moveRange/2;
+  });
+  // 顶部旋转臂
+  S.topArm.angle+=S.topArm.speed;
+
+  const p=S.player;
+
+  if(p.dead){
+    p.deathTimer-=dt;
+    if(p.deathTimer<=0) showEnd(false);
+    particles.forEach(pt=>{ pt.x+=pt.vx; pt.y+=pt.vy; pt.vx*=0.93; pt.vy*=0.93; pt.life-=pt.decay; });
+    particles=particles.filter(pt=>pt.life>0);
+    return;
+  }
+  if(p.won) return;
+
+  const {dx,dy}=inputDir();
+  p.x+=dx; p.y+=dy;
+  p.x=Math.max(p.r+WALL,Math.min(W-p.r-WALL,p.x));
+  p.y=Math.max(p.r+WALL,Math.min(H-p.r-WALL,p.y));
+
+  // ── 拾取斧头 ──
+  if(!S.axe.picked){
+    const dist=Math.hypot(p.x-S.axe.x,p.y-S.axe.y);
+    if(dist<S.axe.r+p.r+10 && (keys['e']||keys['E'])){
+      S.axe.picked=true; p.hasAxe=true;
+      burst(S.axe.x,S.axe.y,'#e67e22');
+      document.getElementById('inventory').textContent='背包：🪓 斧头';
+    }
+  }
+
+  // ── 砸电箱 ──
+  if(!S.electricBox.smashed){
+    const box=S.electricBox;
+    const bcx=box.x+box.w/2, bcy=box.y+box.h/2;
+    if(Math.hypot(p.x-bcx,p.y-bcy)<68 && (keys['e']||keys['E'])){
+      if(p.hasAxe){
+        box.smashed=true; S.powerOff=true;
+        sparkBurst(bcx,bcy); sparkBurst(bcx-14,bcy+10); sparkBurst(bcx+16,bcy-8);
+        burst(bcx,bcy,'#f1c40f');
+        hintMsg='⚡ 断电！通道已开放！'; hintTimer=2.8;
+      } else {
+        hintMsg='🪓 需要斧头才能砸！'; hintTimer=1.6;
+      }
+    }
+  }
+
+  // ── 电流主屏障（通电=固体+致命）──
+  if(!S.powerOff){
+    const b=S.electricBarrier;
+    pushOut(p,b.x,b.y,b.w,b.h);
+    if(circleRect(p.x,p.y,p.r+1,b.x,b.y,b.w,b.h)){ die(); return; }
+  }
+
+  // ── 脉冲电区 ──
+  for(const pz of S.pulseZones){
+    if(pz.on && circleRect(p.x,p.y,p.r,pz.x,pz.y,pz.w,pz.h)){ die(); return; }
+  }
+
+  // ── 旋转臂 ──
+  for(const arm of S.rotatingArms){
+    const tx=arm.x+Math.cos(arm.angle)*arm.len;
+    const ty=arm.y+Math.sin(arm.angle)*arm.len;
+    if(circleLine(p.x,p.y,p.r+4,arm.x,arm.y,tx,ty)){ die(); return; }
+  }
+
+  // ── 叶片 ──
+  for(const b of S.blades){
+    for(let i=0;i<4;i++){
+      const a=b.angle+i*Math.PI/2;
+      const tx=b.x+Math.cos(a)*b.armR,ty=b.y+Math.sin(a)*b.armR;
+      if(circleLine(p.x,p.y,p.r,b.x,b.y,tx,ty)){ die(); return; }
+    }
+  }
+
+  // ── 壁刺 ──
+  for(const ws of [...S.wallSpikes, S.topWallSpike]){
+    if(!ws.extended) continue;
+    const rx=ws.dir==='right'?ws.x:ws.x-ws.spikeLen;
+    const ry=ws.y-(ws.count*(ws.baseW+2))/2;
+    if(circleRect(p.x,p.y,p.r,rx,ry,ws.spikeLen+ws.baseW,ws.count*(ws.baseW+2))){ die(); return; }
+  }
+
+  // ── 地板尖刺 ──
+  for(const sp of S.floorSpikes){
+    if(Math.abs(p.x-sp.x)<p.r+8 && p.y>H-WALL-18-p.r){ die(); return; }
+  }
+
+  // ── 顶部齿轮 ──
+  for(const g of S.topGears){
+    if(Math.hypot(p.x-g.x,p.y-g.y)<g.outerR*0.65+p.r){ die(); return; }
+    for(let i=0;i<g.teeth;i++){
+      const a=g.angle+(i/g.teeth)*Math.PI*2;
+      const tx=g.x+Math.cos(a)*g.outerR,ty=g.y+Math.sin(a)*g.outerR;
+      if(Math.hypot(p.x-tx,p.y-ty)<p.r+5){ die(); return; }
+    }
+  }
+
+  // ── 顶部旋转臂 ──
+  {
+    const arm=S.topArm;
+    const tx=arm.x+Math.cos(arm.angle)*arm.len;
+    const ty=arm.y+Math.sin(arm.angle)*arm.len;
+    if(circleLine(p.x,p.y,p.r+4,arm.x,arm.y,tx,ty)){ die(); return; }
+  }
+
+  // ── 通关 ──
+  const eb=S.endBox;
+  if(p.x>eb.x&&p.x<eb.x+eb.w&&p.y>eb.y&&p.y<eb.y+eb.h){
+    p.won=true;
+    burst(p.x,p.y,'#f1c40f'); burst(W-30,30,'#f1c40f');
+    showEnd(true); return;
+  }
+
+  particles.forEach(pt=>{ pt.x+=pt.vx; pt.y+=pt.vy; pt.vx*=0.93; pt.vy*=0.93; pt.life-=pt.decay; });
+  particles=particles.filter(pt=>pt.life>0);
+}
+
+function die(){
+  const p=S.player;
+  if(p.dead) return;
+  p.dead=true; p.deathTimer=1.0;
+  burst(p.x,p.y,'#c0392b');
+}
+function showEnd(won){
+  const ov=document.getElementById('overlay');
+  ov.style.display='flex';
+  document.getElementById('overlay-msg').textContent=won?'🎉 全部通关！你是天才！':'💀 阵亡！再战！';
+  document.getElementById('restart-btn').style.display='block';
+  if(won) document.getElementById('level4-btn').style.display='block';
+}
+function restartGame(){
+  S=initState(); particles=[]; lastTime=0; hintMsg=''; hintTimer=0;
+  document.getElementById('overlay').style.display='none';
+  document.getElementById('restart-btn').style.display='none';
+  document.getElementById('level4-btn').style.display='none';
+  document.getElementById('inventory').textContent='背包：空';
+  requestAnimationFrame(loop);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW HELPERS
+// ─────────────────────────────────────────────────────────────────
+function setInk(color='#1a0e05',width=1.8){
+  ctx.strokeStyle=color; ctx.lineWidth=width; ctx.fillStyle=color;
+}
+
+// ── 齿轮 ──
+function drawGearSketch(g){
+  const {x,y,outerR,teeth,angle}=g;
+  const innerR=outerR*0.62;
+  ctx.save(); ctx.translate(x,y);
+  ctx.beginPath();
+  for(let i=0;i<teeth;i++){
+    const a0=(i/teeth)*Math.PI*2+angle, a1=((i+0.3)/teeth)*Math.PI*2+angle;
+    const a2=((i+0.7)/teeth)*Math.PI*2+angle, a3=((i+1)/teeth)*Math.PI*2+angle;
+    if(i===0) ctx.moveTo(Math.cos(a0)*innerR,Math.sin(a0)*innerR);
+    else ctx.lineTo(Math.cos(a0)*innerR,Math.sin(a0)*innerR);
+    ctx.lineTo(Math.cos(a1)*outerR,Math.sin(a1)*outerR);
+    ctx.lineTo(Math.cos(a2)*outerR,Math.sin(a2)*outerR);
+    ctx.lineTo(Math.cos(a3)*innerR,Math.sin(a3)*innerR);
+  }
+  ctx.closePath();
+  ctx.fillStyle='rgba(180,160,120,0.55)'; ctx.fill();
+  setInk('#1a0e05',1.8); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0,0,innerR,0,Math.PI*2);
+  ctx.fillStyle='rgba(200,185,145,0.5)'; ctx.fill();
+  setInk('#1a0e05',1.4); ctx.stroke();
+  setInk('#1a0e05',1.2);
+  for(let i=0;i<4;i++){
+    const a=angle+i*Math.PI/2;
+    sketchLine(0,0,Math.cos(a)*innerR*0.85,Math.sin(a)*innerR*0.85);
+  }
+  ctx.beginPath(); ctx.arc(0,0,outerR*0.13,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+  ctx.restore();
+}
+
+// ── 叶片 ──
+function drawBladeSketch(b){
+  ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(b.angle);
+  setInk('#1a0e05',1.6);
+  for(let i=0;i<4;i++){
+    ctx.save(); ctx.rotate(i*Math.PI/2);
+    ctx.beginPath(); ctx.moveTo(0,-3); ctx.lineTo(b.armR,0); ctx.lineTo(0,3);
+    ctx.closePath();
+    ctx.fillStyle='rgba(160,140,100,0.7)'; ctx.fill();
+    setInk('#1a0e05',1.5); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0,0,4,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+  ctx.restore();
+}
+
+// ── 旋转臂 ──
+function drawRotatingArm(arm){
+  ctx.save(); ctx.translate(arm.x,arm.y); ctx.rotate(arm.angle);
+  const hw=arm.width/2;
+  ctx.beginPath(); ctx.rect(0,-hw,arm.len,arm.width);
+  ctx.fillStyle='rgba(145,115,65,0.88)'; ctx.fill();
+  setInk('#1a0e05',2.4); sketchRect(0,-hw,arm.len,arm.width,3);
+  for(let rx=22;rx<arm.len-8;rx+=22){
+    ctx.beginPath(); ctx.arc(rx,0,2.8,0,Math.PI*2);
+    ctx.fillStyle='rgba(200,170,110,0.85)'; ctx.fill();
+    setInk('#1a0e05',0.9); ctx.stroke();
+  }
+  ctx.fillStyle='rgba(80,58,28,0.92)';
+  ctx.fillRect(arm.len-10,-hw-2,12,arm.width+4);
+  setInk('#1a0e05',1.6); sketchRect(arm.len-10,-hw-2,12,arm.width+4,2);
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(arm.x,arm.y,8,0,Math.PI*2);
+  ctx.fillStyle='rgba(65,48,28,0.95)'; ctx.fill();
+  setInk('#1a0e05',1.8); ctx.stroke();
+}
+
+// ── 壁刺 ──
+function drawWallSpikes(ws){
+  const totalH=ws.count*(ws.baseW+2);
+  const plateY=ws.y-totalH/2;
+  const plateX=ws.dir==='right'?ws.x:ws.x-ws.baseW;
+  ctx.fillStyle='rgba(70,50,28,0.90)';
+  ctx.fillRect(plateX,plateY,ws.baseW,totalH);
+  setInk('#1a0e05',1.8); sketchRect(plateX,plateY,ws.baseW,totalH,2);
+  if(ws.extended){
+    ctx.save();
+    ctx.shadowColor='#c0392b'; ctx.shadowBlur=14;
+    ctx.fillStyle='rgba(192,57,43,0.18)';
+    ctx.fillRect(ws.dir==='right'?ws.x:ws.x-ws.spikeLen-ws.baseW,plateY,ws.spikeLen+ws.baseW,totalH);
+    ctx.restore();
+    for(let i=0;i<ws.count;i++){
+      const cy=plateY+i*(ws.baseW+2)+(ws.baseW+2)/2;
+      let bx,tipX;
+      if(ws.dir==='right'){ bx=ws.x+ws.baseW; tipX=bx+ws.spikeLen; }
+      else { bx=ws.x-ws.baseW; tipX=bx-ws.spikeLen; }
+      ctx.beginPath();
+      ctx.moveTo(bx,cy-ws.baseW/2); ctx.lineTo(bx,cy+ws.baseW/2); ctx.lineTo(tipX,cy);
+      ctx.closePath();
+      ctx.fillStyle='rgba(35,22,10,0.90)'; ctx.fill();
+      setInk('#1a0e05',1.1); ctx.stroke();
+    }
+  } else {
+    for(let i=0;i<ws.count;i++){
+      const cy=plateY+i*(ws.baseW+2)+(ws.baseW+2)/2;
+      let bx,tipX;
+      if(ws.dir==='right'){ bx=ws.x+ws.baseW; tipX=bx+6; }
+      else { bx=ws.x-ws.baseW; tipX=bx-6; }
+      ctx.beginPath();
+      ctx.moveTo(bx,cy-ws.baseW*0.3); ctx.lineTo(bx,cy+ws.baseW*0.3); ctx.lineTo(tipX,cy);
+      ctx.closePath();
+      ctx.fillStyle='rgba(60,42,20,0.45)'; ctx.fill();
+    }
+  }
+}
+
+// ── 地板尖刺 ──
+function drawFloorSpikes(){
+  const SPIKE_W=18,SPIKE_H=18;
+  S.floorSpikes.forEach(sp=>{
+    ctx.beginPath();
+    ctx.moveTo(sp.x-SPIKE_W/2,H-WALL);
+    ctx.lineTo(sp.x+SPIKE_W/2,H-WALL);
+    ctx.lineTo(sp.x,H-WALL-SPIKE_H);
+    ctx.closePath();
+    ctx.fillStyle='rgba(40,28,15,0.85)'; ctx.fill();
+    setInk('#1a0e05',1.0); ctx.stroke();
+  });
+}
+
+// ── 脉冲电区 ──
+function drawPulseZone(pz){
+  const {x,y,w,h,on}=pz;
+  const seg=14,steps=Math.floor(w/seg);
+  ctx.beginPath();
+  ctx.moveTo(x,y+h/2);
+  for(let i=0;i<=steps;i++){
+    ctx.lineTo(x+i*seg,y+(i%2===0?0:h));
+  }
+  if(on){
+    ctx.save();
+    ctx.shadowColor='#e74c3c'; ctx.shadowBlur=10;
+    ctx.strokeStyle='#e74c3c'; ctx.lineWidth=2.5;
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    ctx.strokeStyle='rgba(50,35,20,0.40)'; ctx.lineWidth=1.2;
+    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+// ── 斧头（大尺寸，清晰可辨）──
+function drawAxe(axe){
+  if(axe.picked) return;
+  const {x,y}=axe;
+
+  // 常驻标签（不需要靠近也能看到）
+  ctx.font='bold 12px Courier New';
+  ctx.textAlign='center';
+  ctx.fillStyle='rgba(60,35,12,0.75)';
+  ctx.fillText('斧头',x,y-38);
+
+  ctx.save();
+  ctx.translate(x,y);
+
+  // 木柄：粗棕色手柄
+  ctx.strokeStyle='#5a2e0a'; ctx.lineWidth=5;
+  ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,28); ctx.lineTo(0,-20); ctx.stroke();
+  // 柄上绕绳纹理
+  ctx.strokeStyle='rgba(100,55,20,0.55)'; ctx.lineWidth=1.5;
+  for(let gy=22;gy>4;gy-=5){
+    ctx.beginPath(); ctx.moveTo(-3,gy); ctx.lineTo(3,gy+2); ctx.stroke();
+  }
+
+  // 斧头金属部分：明显的大楔形刀刃
+  ctx.beginPath();
+  ctx.moveTo(-2, -8);        // 柄与刃连接上
+  ctx.lineTo(26, -26);       // 刃顶端
+  ctx.lineTo(30,  0);        // 刃前锋
+  ctx.lineTo(26,  20);       // 刃底端（更宽，更有砍劈感）
+  ctx.lineTo(-2,  12);       // 柄与刃连接下
+  ctx.closePath();
+  ctx.fillStyle='rgba(175,178,195,0.95)'; ctx.fill();
+  setInk('#1a0e05',2.0); ctx.stroke();
+
+  // 刃面高光
+  ctx.beginPath();
+  ctx.moveTo(2,-6); ctx.lineTo(22,-20); ctx.lineTo(26,-2);
+  ctx.strokeStyle='rgba(230,235,255,0.75)'; ctx.lineWidth=1.8; ctx.stroke();
+
+  // 刃背厚度（让斧头有体积感）
+  ctx.beginPath();
+  ctx.moveTo(-2,-8); ctx.lineTo(-8,-10); ctx.lineTo(-8,14); ctx.lineTo(-2,12);
+  ctx.closePath();
+  ctx.fillStyle='rgba(120,122,140,0.85)'; ctx.fill();
+  setInk('#1a0e05',1.2); ctx.stroke();
+
+  // 柄顶固定环
+  ctx.beginPath(); ctx.arc(0,-19,4,0,Math.PI*2);
+  ctx.fillStyle='rgba(90,80,55,0.85)'; ctx.fill();
+  setInk('#1a0e05',1.2); ctx.stroke();
+
+  ctx.restore();
+
+  // 靠近时显示 [E] 提示
+  const dist=Math.hypot(S.player.x-x,S.player.y-y);
+  if(dist<70){
+    ctx.fillStyle='rgba(60,35,12,0.90)';
+    ctx.font='bold 12px Courier New';
+    ctx.textAlign='center';
+    ctx.fillText('[E] 拾取',x,y-52);
+  }
+}
+
+// ── 电箱 ──
+function drawElectricBox(box){
+  const {x,y,w,h,smashed,glowTimer}=box;
+  const bcx=x+w/2,bcy=y+h/2;
+
+  // 常驻标签
+  ctx.font='bold 12px Courier New';
+  ctx.textAlign='center';
+  ctx.fillStyle=smashed?'rgba(90,90,90,0.5)':'rgba(60,35,12,0.80)';
+  ctx.fillText('电箱',bcx,y-14);
+
+  if(smashed){
+    ctx.fillStyle='rgba(40,35,20,0.75)';
+    ctx.fillRect(x,y,w,h);
+    setInk('#1a0e05',2.0); sketchRect(x,y,w,h,3);
+    setInk('rgba(26,14,5,0.45)',1.0);
+    sketchLine(x+w*0.25,y+4,x+w*0.6,y+h*0.55,2);
+    sketchLine(x+w*0.6,y+h*0.55,x+w*0.4,y+h-4,2);
+    sketchLine(x+w*0.6,y+h*0.55,x+w*0.82,y+h*0.38,2);
+    ctx.fillStyle='rgba(80,65,40,0.65)';
+    ctx.font='18px Courier New'; ctx.textAlign='center';
+    ctx.fillText('✕',bcx,bcy+7);
+    ctx.fillStyle='rgba(100,80,50,0.50)';
+    ctx.font='8px Courier New';
+    ctx.fillText('DEAD',bcx,y+h-5);
+    return;
+  }
+
+  const pulse=0.65+0.35*Math.sin(glowTimer*7);
+
+  ctx.save();
+  ctx.shadowColor='#f1c40f'; ctx.shadowBlur=16*pulse;
+  ctx.fillStyle='rgba(28,42,24,0.94)';
+  ctx.fillRect(x,y,w,h);
+  ctx.restore();
+  setInk('#1a0e05',2.4); sketchRect(x,y,w,h,3);
+
+  // 顶部红色指示条
+  ctx.save();
+  ctx.shadowColor='#e74c3c'; ctx.shadowBlur=8*pulse;
+  ctx.fillStyle=`rgba(231,76,60,${0.85*pulse})`;
+  ctx.fillRect(x+4,y+4,w-8,5);
+  ctx.restore();
+
+  // 闪电图标
+  ctx.save();
+  ctx.shadowColor='#f1c40f'; ctx.shadowBlur=14*pulse;
+  ctx.fillStyle=`rgba(241,196,15,${0.92*pulse})`;
+  ctx.font='bold 24px Courier New'; ctx.textAlign='center';
+  ctx.fillText('⚡',bcx,bcy+9);
+  ctx.restore();
+
+  [[5,5],[w-5,5],[5,h-5],[w-5,h-5]].forEach(([ox,oy])=>{
+    ctx.beginPath(); ctx.arc(x+ox,y+oy,2.5,0,Math.PI*2);
+    ctx.fillStyle='rgba(100,85,55,0.70)'; ctx.fill();
+    setInk('#1a0e05',0.8); ctx.stroke();
+  });
+
+  ctx.fillStyle=`rgba(231,76,60,${0.8*pulse})`;
+  ctx.font='bold 8px Courier New'; ctx.textAlign='center';
+  ctx.fillText('LIVE',bcx,y+h-5);
+
+  // 操作提示
+  if(Math.hypot(S.player.x-bcx,S.player.y-bcy)<72){
+    ctx.font='bold 12px Courier New'; ctx.textAlign='center';
+    if(S.player.hasAxe){
+      ctx.fillStyle='rgba(60,35,12,0.92)';
+      ctx.fillText('[E] 用斧砸电箱！',bcx,y-28);
+    } else {
+      ctx.fillStyle='rgba(180,55,15,0.88)';
+      ctx.fillText('需要🪓斧头',bcx,y-28);
+    }
+  }
+}
+
+// ── 电流主屏障 ──
+function drawElectricBarrier(b){
+  const {x,y,w,h,glowTimer}=b;
+
+  if(S.powerOff){
+    ctx.strokeStyle='rgba(90,90,90,0.28)';
+    ctx.lineWidth=1.0; ctx.setLineDash([8,6]);
+    ctx.beginPath(); ctx.moveTo(x,y+h/2); ctx.lineTo(x+w,y+h/2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='rgba(90,90,90,0.30)';
+    ctx.font='10px Courier New'; ctx.textAlign='center';
+    ctx.fillText('-- 断电 --',x+w/2,y+h/2-4);
+    return;
+  }
+
+  const pulse=0.55+0.45*Math.sin(glowTimer*9);
+
+  // 导轨
+  ctx.fillStyle='rgba(50,42,22,0.88)';
+  ctx.fillRect(x,y,w,4); ctx.fillRect(x,y+h-4,w,4);
+  setInk('#1a0e05',1.0);
+  sketchRect(x,y,w,4,1); sketchRect(x,y+h-4,w,4,1);
+
+  // 蓝色主电弧
+  ctx.save();
+  ctx.shadowColor='#2980b9'; ctx.shadowBlur=20*pulse;
+  ctx.strokeStyle=`rgba(52,152,219,${0.88*pulse})`;
+  ctx.lineWidth=4;
+  const seg=15,steps=Math.floor(w/seg);
+  ctx.beginPath(); ctx.moveTo(x,y+h/2);
+  for(let i=0;i<=steps;i++) ctx.lineTo(x+i*seg,y+(i%2===0?3:h-3));
+  ctx.stroke();
+
+  // 黄色核心
+  ctx.shadowColor='#f1c40f'; ctx.shadowBlur=10*pulse;
+  ctx.strokeStyle=`rgba(241,196,15,${0.96*pulse})`;
+  ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(x,y+h/2);
+  for(let i=0;i<=steps;i++) ctx.lineTo(x+i*seg,y+(i%2===0?5:h-5));
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle=`rgba(241,196,15,${0.82*pulse})`;
+  ctx.font='bold 12px Courier New'; ctx.textAlign='center';
+  for(let lx=x+70;lx<x+w-40;lx+=140) ctx.fillText('⚡',lx,y+h/2+4);
+}
+
+// ── 电源线（电箱→屏障）──
+function drawPowerWire(){
+  const box=S.electricBox;
+  const bar=S.electricBarrier;
+  const wireX=box.x+box.w/2;
+
+  if(S.powerOff){
+    ctx.strokeStyle='rgba(80,80,80,0.22)';
+    ctx.lineWidth=1.5; ctx.setLineDash([4,5]);
+    ctx.beginPath(); ctx.moveTo(wireX,box.y); ctx.lineTo(wireX,bar.y+bar.h);
+    ctx.stroke(); ctx.setLineDash([]);
+    return;
+  }
+  const pulse=0.5+0.5*Math.sin(S.electricBox.glowTimer*8);
+  ctx.save();
+  ctx.shadowColor='#3498db'; ctx.shadowBlur=10*pulse;
+  ctx.strokeStyle=`rgba(52,152,219,${0.72*pulse})`; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.moveTo(wireX,box.y); ctx.lineTo(wireX,bar.y+bar.h);
+  ctx.stroke();
+  ctx.strokeStyle=`rgba(241,196,15,${0.8*pulse})`; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(wireX,box.y); ctx.lineTo(wireX,bar.y+bar.h);
+  ctx.stroke();
+  ctx.restore();
+  // 中间接线盒
+  const midY=(box.y+bar.y+bar.h)/2;
+  ctx.fillStyle='rgba(40,52,28,0.88)';
+  ctx.fillRect(wireX-7,midY-7,14,14);
+  setInk('#1a0e05',1.2); sketchRect(wireX-7,midY-7,14,14,1);
+}
+
+// ── 玩家（完全与第四关一致）──
+function drawPlayer(){
+  const p=S.player;
+  if(p.dead && Math.floor(p.deathTimer*12)%2===0) return;
+  ctx.save();
+  ctx.translate(p.x,p.y);
+
+  setInk('#1a0e05',2);
+  ctx.beginPath();
+  ctx.arc(0,0,p.r,0,Math.PI*2);
+  ctx.fillStyle=p.won?'rgba(220,180,50,0.9)':'rgba(200,230,230,0.9)';
+  ctx.fill(); ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(2,-1,p.r*0.5,0,Math.PI*2);
+  ctx.fillStyle='rgba(100,180,200,0.55)';
+  ctx.fill();
+  setInk('#1a0e05',1);
+  ctx.stroke();
+
+  ctx.beginPath(); ctx.arc(3,-1,2.5,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+
+  // 喷气尾焰
+  setInk('rgba(200,120,20,0.8)',1.5);
+  const thrx=-p.r-2;
+  ctx.beginPath();
+  ctx.moveTo(thrx,0);
+  ctx.quadraticCurveTo(thrx-5,-4,thrx-8+Math.random()*4,-2+Math.random()*4);
+  ctx.stroke();
+
+  // 持斧时在右上角显示小斧图标
+  if(p.hasAxe){
+    ctx.save();
+    ctx.translate(p.r-2,-p.r+2);
+    ctx.scale(0.55,0.55);
+    ctx.strokeStyle='#5a2e0a'; ctx.lineWidth=4; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(0,14); ctx.lineTo(0,-10); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-1,-4); ctx.lineTo(14,-14); ctx.lineTo(16,2); ctx.lineTo(14,12); ctx.lineTo(-1,8);
+    ctx.closePath();
+    ctx.fillStyle='rgba(175,178,195,0.95)'; ctx.fill();
+    setInk('#1a0e05',1.8); ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW
+// ─────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.drawImage(paperCanvas,0,0);
+
+  // 外壁
+  ctx.fillStyle='rgba(60,45,25,0.92)';
+  ctx.fillRect(0,0,W,WALL); ctx.fillRect(0,H-WALL,W,WALL);
+  ctx.fillRect(0,0,WALL,H); ctx.fillRect(W-WALL,0,WALL,H);
+  setInk('#1a0e05',2.5); sketchRect(0,0,W,H,3);
+
+  // 起点框
+  const sb=S.startBox;
+  ctx.fillStyle='rgba(80,180,80,0.25)'; ctx.fillRect(sb.x,sb.y,sb.w,sb.h);
+  setInk('#2a6a2a',2); sketchRect(sb.x,sb.y,sb.w,sb.h,2);
+  ctx.fillStyle='rgba(30,110,30,0.7)'; ctx.font='bold 10px Courier New'; ctx.textAlign='center';
+  ctx.fillText('START',sb.x+sb.w/2,sb.y+sb.h/2+4);
+
+  // 终点框（断电前灰色锁住）
+  const eb=S.endBox;
+  ctx.fillStyle=S.powerOff?'rgba(80,180,80,0.30)':'rgba(155,155,155,0.18)';
+  ctx.fillRect(eb.x,eb.y,eb.w,eb.h);
+  setInk(S.powerOff?'#2a6a2a':'#999',2); sketchRect(eb.x,eb.y,eb.w,eb.h,2);
+  ctx.fillStyle=S.powerOff?'rgba(30,110,30,0.85)':'rgba(110,110,110,0.55)';
+  ctx.font='bold 10px Courier New'; ctx.textAlign='center';
+  ctx.fillText(S.powerOff?'EXIT':'🔒',eb.x+eb.w/2,eb.y+eb.h/2+4);
+
+  // 顶部封锁提示（断电前）
+  if(!S.powerOff){
+    ctx.fillStyle='rgba(52,152,219,0.07)';
+    ctx.fillRect(WALL,WALL,W-2*WALL,S.electricBarrier.y-WALL);
+    ctx.fillStyle='rgba(40,100,180,0.32)';
+    ctx.font='bold 13px Courier New'; ctx.textAlign='center';
+    ctx.fillText('⚡ 通电封锁 ⚡',W/2,S.electricBarrier.y/2+5);
+  }
+
+  // 电源线
+  drawPowerWire();
+
+  // 主电流屏障
+  drawElectricBarrier(S.electricBarrier);
+
+  // 底部地板尖刺
+  drawFloorSpikes();
+
+  // 脉冲电区
+  S.pulseZones.forEach(drawPulseZone);
+
+  // 底部障碍
+  S.rotatingArms.forEach(drawRotatingArm);
+  S.blades.forEach(drawBladeSketch);
+  S.wallSpikes.forEach(drawWallSpikes);
+
+  // 顶部障碍
+  S.topGears.forEach(drawGearSketch);
+  drawRotatingArm(S.topArm);
+  drawWallSpikes(S.topWallSpike);
+
+  // 道具
+  drawAxe(S.axe);
+  drawElectricBox(S.electricBox);
+
+  // 玩家
+  drawPlayer();
+
+  // 粒子
+  particles.forEach(pt=>{
+    ctx.globalAlpha=pt.life*0.85;
+    ctx.fillStyle=pt.color;
+    ctx.beginPath(); ctx.arc(pt.x,pt.y,pt.r*pt.life,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1;
+
+  // 提示文字
+  if(hintTimer>0){
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,hintTimer);
+    ctx.fillStyle='rgba(28,16,4,0.90)';
+    ctx.font='bold 17px Courier New'; ctx.textAlign='center';
+    ctx.fillText(hintMsg,W/2,H/2-55);
+    ctx.restore();
+  }
+
+  // 持斧后的方向引导
+  if(S.player.hasAxe && !S.electricBox.smashed){
+    ctx.fillStyle='rgba(160,100,20,0.65)';
+    ctx.font='11px Courier New'; ctx.textAlign='left';
+    ctx.fillText('→ 去右侧砸电箱',WALL+14,H-WALL-50);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  GAME LOOP
+// ─────────────────────────────────────────────────────────────────
+function loop(ts){
+  const dt=Math.min((ts-(lastTime||ts))/1000,0.05);
+  lastTime=ts;
+  update(dt);
+  draw();
+  if(!S.player.won && !(S.player.dead && S.player.deathTimer<=0)) requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

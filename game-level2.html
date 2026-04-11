@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>闯关游戏 · 第二关</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #c8b89a;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  min-height: 100vh;
+  font-family: 'Courier New', monospace;
+}
+#ui {
+  color: #3a2a1a;
+  margin-bottom: 8px;
+  font-size: 13px;
+  display: flex; gap: 16px; align-items: center;
+  font-family: 'Courier New', monospace;
+}
+#ui-left { display: flex; gap: 16px; align-items: center; }
+#level-label {
+  font-weight: bold; color: #5a3010;
+  background: rgba(245,240,220,0.7);
+  border: 1px solid #3a2a1a;
+  padding: 2px 8px;
+}
+#level1-link {
+  font-size: 12px; color: #3a2a1a;
+  background: rgba(245,240,220,0.7);
+  border: 1px solid #3a2a1a;
+  padding: 2px 8px; cursor: pointer;
+  text-decoration: none; font-family: 'Courier New', monospace;
+}
+#level1-link:hover { background: #ffe0a0; }
+#timer-warning {
+  color: #8b0000; font-weight: bold;
+  animation: blink 0.4s infinite; display: none;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.1} }
+#canvas-wrap {
+  position: relative;
+  box-shadow: 4px 4px 18px rgba(0,0,0,0.4);
+}
+canvas { display: block; }
+#overlay {
+  position: absolute; inset: 0;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+#overlay-msg {
+  font-size: 38px; font-weight: bold;
+  color: #3a2a1a;
+  text-shadow: 2px 2px 0 #fff, -1px -1px 0 #fff;
+  font-family: 'Courier New', monospace;
+}
+#restart-btn {
+  margin-top: 18px; padding: 10px 28px;
+  font-size: 15px; font-family: 'Courier New', monospace;
+  background: #f5f0e8; border: 2px solid #3a2a1a;
+  cursor: pointer; color: #3a2a1a; font-weight: bold;
+  pointer-events: all;
+  box-shadow: 3px 3px 0 #3a2a1a;
+  display: none;
+}
+#restart-btn:hover { background: #ffe0a0; }
+#next-btn {
+  margin-top: 10px; padding: 10px 28px;
+  font-size: 15px; font-family: 'Courier New', monospace;
+  background: #3a2a1a; border: 2px solid #3a2a1a;
+  cursor: pointer; color: #f5f0e8; font-weight: bold;
+  pointer-events: all;
+  box-shadow: 3px 3px 0 rgba(0,0,0,0.4);
+  display: none;
+}
+#next-btn:hover { background: #5a4a2a; }
+#level1-btn {
+  margin-top: 10px; padding: 8px 22px;
+  font-size: 13px; font-family: 'Courier New', monospace;
+  background: #f5f0e8; border: 2px solid #3a2a1a;
+  cursor: pointer; color: #3a2a1a;
+  pointer-events: all;
+  box-shadow: 3px 3px 0 #3a2a1a;
+  display: none;
+  text-decoration: none;
+}
+#level1-btn:hover { background: #ffe0a0; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="ui-left">
+    <span id="level-label">✏️ 第二关</span>
+    <a id="level1-link" href="game-level1.html">← 第一关</a>
+    <span>WASD / 方向键 移动 &nbsp;|&nbsp; 靠近拉杆按 <b>E</b> 拉动</span>
+  </div>
+  <span id="timer-display">⏱ 00:00</span>
+  <span id="timer-warning">⚠️ 重力尖刺即将落下！</span>
+</div>
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <div id="overlay-msg"></div>
+    <button id="restart-btn" onclick="restartGame()">重新开始</button>
+    <button id="next-btn" onclick="window.location.href='game-level3.html'">进入第三关 →</button>
+    <a id="level1-btn" href="game-level1.html">← 返回第一关</a>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+//  CANVAS SETUP
+// ─────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+const W = 900, H = 560;
+canvas.width  = W;
+canvas.height = H;
+
+// ─────────────────────────────────────────────────────────────────
+//  SKETCH HELPERS  (hand-drawn look)
+// ─────────────────────────────────────────────────────────────────
+function sketchLine(x1,y1,x2,y2,passes=2){
+  for(let p=0;p<passes;p++){
+    const jitter = ()=>(Math.random()-0.5)*1.4;
+    ctx.beginPath();
+    ctx.moveTo(x1+jitter(), y1+jitter());
+    ctx.lineTo(x2+jitter(), y2+jitter());
+    ctx.stroke();
+  }
+}
+function sketchRect(x,y,w,h,passes=2){
+  sketchLine(x,y,x+w,y,passes);
+  sketchLine(x+w,y,x+w,y+h,passes);
+  sketchLine(x+w,y+h,x,y+h,passes);
+  sketchLine(x,y+h,x,y,passes);
+}
+function sketchCircle(cx,cy,r,passes=2){
+  for(let p=0;p<passes;p++){
+    ctx.beginPath();
+    const offset = (Math.random()-0.5)*1.2;
+    ctx.ellipse(cx+offset,cy+offset, r+(Math.random()-0.5)*1.5, r+(Math.random()-0.5)*1.5, 0, 0, Math.PI*2);
+    ctx.stroke();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  PAPER TEXTURE  (pre-drawn on offscreen canvas)
+// ─────────────────────────────────────────────────────────────────
+const paperCanvas = document.createElement('canvas');
+paperCanvas.width = W; paperCanvas.height = H;
+const pctx = paperCanvas.getContext('2d');
+// base paper
+pctx.fillStyle = '#f5f0e0';
+pctx.fillRect(0,0,W,H);
+// notebook lines
+pctx.strokeStyle = 'rgba(150,180,220,0.35)';
+pctx.lineWidth = 0.8;
+for(let y=30; y<H; y+=28){
+  pctx.beginPath(); pctx.moveTo(0,y); pctx.lineTo(W,y); pctx.stroke();
+}
+// margin line
+pctx.strokeStyle = 'rgba(220,130,130,0.4)';
+pctx.lineWidth = 1;
+pctx.beginPath(); pctx.moveTo(55,0); pctx.lineTo(55,H); pctx.stroke();
+// grain noise
+for(let i=0;i<4000;i++){
+  const x=Math.random()*W, y=Math.random()*H;
+  pctx.fillStyle=`rgba(120,80,40,${Math.random()*0.06})`;
+  pctx.fillRect(x,y,1,1);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────────────────────────
+const WALL = 10;
+let keys={}, particles=[], lastTime=0;
+
+function initState(){
+  return {
+    elapsed: 0,
+    gravityDropped: false,
+    doorOpenedAt: null,      // tracks when DOOR2 opens (triggers spike plate)
+    spikeDropDelay: 4,
+
+    player: { x:30, y:38, vx:0, vy:0, r:9, dead:false, won:false, deathTimer:0 },
+
+    // GEARS
+    // moveAxis:'x' → horizontal moving gear; railY, railLeft, railRight for horizontal rail
+    gears: [
+      // fixed gear upper-left
+      { x:190, y:160, outerR:58, teeth:13, angle:0, angSpeed:0.012, moveAxis:null },
+      // fixed gear upper-right
+      { x:730, y:170, outerR:52, teeth:12, angle:0, angSpeed:-0.014, moveAxis:null },
+      // horizontal moving gear — rides horizontal rail at y:290
+      { x:450, y:290, outerR:45, teeth:10, angle:0, angSpeed:0.02,
+        moveAxis:'x', basePos:450, moveRange:220, moveSpeed:1.0, phase:0,
+        railY:290, railLeft:340, railRight:560 },
+    ],
+
+    // BLADES: spinning 4-arm
+    blades: [
+      { x:160, y:410, armR:32, angle:0,          angSpeed:0.048 },
+      { x:720, y:410, armR:32, angle:Math.PI/4,  angSpeed:-0.052 },
+    ],
+
+    // PENDULUM BLADE: pivot at (480, WALL), swings ±0.75 rad, period ~3s
+    pendulum: {
+      pivotX: 480, pivotY: WALL,
+      armLen: 130,
+      angle: 0,           // current angle (0 = straight down)
+      amplitude: 0.75,
+      period: 3.0,
+      timer: 0,
+    },
+
+    // TOP SPIKES — full row ceiling
+    topSpikes: buildTopSpikes(),
+
+    // GRAVITY SPIKE PLATE — triggered by door2 opening
+    gravitySpikes: [
+      { x:580, w:130, plateH:12, spikeH:16,
+        ropeTop: WALL, hangY: 55,
+        fallY: H-WALL-12-16,
+        currentY: 55, fallen:false, falling:false },
+    ],
+
+    // PULSE ZONES (two separate zones)
+    pulseZones: [
+      { x:WALL, y:410, w:305-WALL, h:20, timer:0.0, period:2.6, duty:0.52 },
+      { x:605,  y:410, w:W-WALL-605, h:20, timer:1.3, period:2.4, duty:0.52 },
+    ],
+
+    // TWO DOORS
+    door1: { x:305, y:WALL, w:18, h:260, open:false, openProgress:0 },
+    door2: { x:605, y:WALL, w:18, h:260, open:false, openProgress:0 },
+
+    // TWO LEVERS
+    lever1: {
+      x: 140, y: H - WALL,
+      armLen: 52,
+      angle: -Math.PI*0.72,
+      targetAngle: -Math.PI*0.28,
+      activated: false,
+    },
+    lever2: {
+      x: 500, y: H - WALL,   // center zone — left of door2, reachable after door1 opens
+      armLen: 52,
+      angle: -Math.PI*0.72,
+      targetAngle: -Math.PI*0.28,
+      activated: false,
+    },
+
+    // SOLID RODS (impassable dividers — partial vertical posts)
+    rods: [],   // dividers handled by door+barrierWall; no extra rods needed
+    hWalls: [],
+
+    // BARRIER WALLS (permanent lower portions of the dividers)
+    barrierWall1: { x:305, y:260, w:18, h: H-WALL-260 },
+    barrierWall2: { x:605, y:260, w:18, h: H-WALL-260 },
+
+    startBox: { x:WALL,    y:WALL, w:40, h:40 },
+    endBox:   { x:W-WALL-40, y:WALL, w:40, h:40 },
+  };
+}
+
+function buildTopSpikes(){
+  const spikes = [];
+  const SPIKE_W = 18;
+  for(let x = 50; x < W-50; x += SPIKE_W){
+    spikes.push({ x: x+SPIKE_W/2, y: WALL });
+  }
+  return spikes;
+}
+
+let S = initState();
+
+// ─────────────────────────────────────────────────────────────────
+//  INPUT
+// ─────────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e=>{ keys[e.key]=true; e.preventDefault(); });
+document.addEventListener('keyup',   e=>{ keys[e.key]=false; });
+function inputDir(){
+  const SPD = 3.0;
+  let dx=0, dy=0;
+  if(keys['ArrowLeft'] ||keys['a']||keys['A']) dx -= SPD;
+  if(keys['ArrowRight']||keys['d']||keys['D']) dx += SPD;
+  if(keys['ArrowUp']   ||keys['w']||keys['W']) dy -= SPD;
+  if(keys['ArrowDown'] ||keys['s']||keys['S']) dy += SPD;
+  return {dx,dy};
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  COLLISION
+// ─────────────────────────────────────────────────────────────────
+function circleRect(cx,cy,cr, rx,ry,rw,rh){
+  const nx=Math.max(rx,Math.min(cx,rx+rw));
+  const ny=Math.max(ry,Math.min(cy,ry+rh));
+  return (cx-nx)**2+(cy-ny)**2 < cr*cr;
+}
+function circleLine(cx,cy,cr, x1,y1,x2,y2){
+  const ddx=x2-x1,ddy=y2-y1;
+  const t=Math.max(0,Math.min(1,((cx-x1)*ddx+(cy-y1)*ddy)/(ddx*ddx+ddy*ddy)));
+  const px=x1+t*ddx,py=y1+t*ddy;
+  return (cx-px)**2+(cy-py)**2<cr*cr;
+}
+function pushOut(p, rx,ry,rw,rh){
+  if(!circleRect(p.x,p.y,p.r, rx,ry,rw,rh)) return;
+  const cx=rx+rw/2, cy=ry+rh/2;
+  const ox=(rw/2+p.r)-Math.abs(p.x-cx);
+  const oy=(rh/2+p.r)-Math.abs(p.y-cy);
+  if(ox<oy) p.x += ox*Math.sign(p.x-cx);
+  else      p.y += oy*Math.sign(p.y-cy);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  PARTICLES
+// ─────────────────────────────────────────────────────────────────
+const PCOLORS=['#c0392b','#e67e22','#8e44ad','#2c3e50'];
+function burst(x,y,col){
+  for(let i=0;i<22;i++){
+    const a=Math.random()*Math.PI*2, sp=1.5+Math.random()*5;
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+      life:1,decay:0.02+Math.random()*0.025,
+      r:2+Math.random()*5,color:col||PCOLORS[Math.floor(Math.random()*4)]});
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  UPDATE
+// ─────────────────────────────────────────────────────────────────
+function update(dt){
+  S.elapsed += dt;
+
+  // timer UI
+  const sec=Math.floor(S.elapsed);
+  document.getElementById('timer-display').textContent=
+    `⏱ ${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+
+  // spike plate triggered by door2 opening
+  if(S.door2.open && S.doorOpenedAt === null){
+    S.doorOpenedAt = S.elapsed;
+  }
+  if(S.doorOpenedAt !== null && !S.gravityDropped){
+    const sinceOpen = S.elapsed - S.doorOpenedAt;
+    const warn = S.spikeDropDelay - 1.5;
+    if(sinceOpen >= warn)
+      document.getElementById('timer-warning').style.display='inline';
+    if(sinceOpen >= S.spikeDropDelay){
+      S.gravityDropped = true;
+      S.gravitySpikes.forEach(g=>{ g.falling=true; });
+      document.getElementById('timer-warning').style.display='none';
+    }
+  }
+
+  // gravity spike plate fall
+  S.gravitySpikes.forEach(g=>{
+    if(g.falling && !g.fallen){
+      g.currentY += 7;
+      if(g.currentY >= g.fallY){
+        g.currentY = g.fallY;
+        g.fallen = true; g.falling = false;
+        burst(g.x+g.w/2, g.fallY+g.plateH,'#c0392b');
+      }
+    }
+  });
+
+  // rotate gears + horizontal movement
+  S.gears.forEach(g=>{
+    g.angle += g.angSpeed;
+    if(g.moveAxis==='x'){
+      g.phase += g.moveSpeed * dt;
+      g.x = g.basePos + Math.sin(g.phase)*g.moveRange/2;
+    }
+  });
+
+  // spin blades
+  S.blades.forEach(b=>b.angle+=b.angSpeed);
+
+  // pendulum oscillation (sine)
+  S.pendulum.timer += dt;
+  S.pendulum.angle = S.pendulum.amplitude * Math.sin((S.pendulum.timer / S.pendulum.period) * Math.PI * 2);
+
+  // pulse timers
+  S.pulseZones.forEach(p=>{ p.timer+=dt; p.on=(p.timer%p.period)<p.period*p.duty; });
+
+  // lever interactions
+  const p = S.player;
+
+  // lever1
+  const lev1 = S.lever1;
+  const lev1PivotY = lev1.y - 10;
+  const lev1Dist = Math.hypot(p.x - lev1.x, p.y - lev1PivotY);
+  if(!lev1.activated && lev1Dist < 55 && (keys['e']||keys['E'])){
+    lev1.activated = true;
+    S.door1.open = true;
+    burst(lev1.x, lev1.y, '#e67e22');
+  }
+  if(lev1.activated){
+    lev1.angle += (lev1.targetAngle - lev1.angle)*0.12;
+  }
+
+  // lever2
+  const lev2 = S.lever2;
+  const lev2PivotY = lev2.y - 10;
+  const lev2Dist = Math.hypot(p.x - lev2.x, p.y - lev2PivotY);
+  if(!lev2.activated && lev2Dist < 55 && (keys['e']||keys['E'])){
+    lev2.activated = true;
+    S.door2.open = true;
+    burst(lev2.x, lev2.y, '#e67e22');
+  }
+  if(lev2.activated){
+    lev2.angle += (lev2.targetAngle - lev2.angle)*0.12;
+  }
+
+  // animate doors sliding up
+  [S.door1, S.door2].forEach(door=>{
+    if(door.open && door.openProgress < 1){
+      door.openProgress = Math.min(1, door.openProgress + dt * 1.4);
+    }
+  });
+
+  if(p.dead){
+    p.deathTimer-=dt;
+    if(p.deathTimer<=0) showEnd(false);
+    particles.forEach(pt=>{ pt.x+=pt.vx; pt.y+=pt.vy; pt.vx*=0.93; pt.vy*=0.93; pt.life-=pt.decay; });
+    particles=particles.filter(pt=>pt.life>0);
+    return;
+  }
+  if(p.won) return;
+
+  // movement
+  const {dx,dy}=inputDir();
+  p.x+=dx; p.y+=dy;
+
+  // boundary
+  p.x=Math.max(p.r+WALL, Math.min(W-p.r-WALL, p.x));
+  p.y=Math.max(p.r+WALL, Math.min(H-p.r-WALL, p.y));
+
+  // push out of solid rods
+  S.rods.forEach(r=>pushOut(p, r.x,r.y,r.w,r.h));
+  S.hWalls.forEach(r=>pushOut(p, r.x,r.y,r.w,r.h));
+
+  // push out of barrier walls (permanent)
+  pushOut(p, S.barrierWall1.x,S.barrierWall1.y,S.barrierWall1.w,S.barrierWall1.h);
+  pushOut(p, S.barrierWall2.x,S.barrierWall2.y,S.barrierWall2.w,S.barrierWall2.h);
+
+  // door1 collision
+  if(S.door1.openProgress < 1){
+    const d=S.door1;
+    const remainH = d.h * (1 - d.openProgress);
+    const curY    = d.y + d.h - remainH;
+    if(remainH > 4) pushOut(p, d.x, curY, d.w, remainH);
+  }
+  // door2 collision
+  if(S.door2.openProgress < 1){
+    const d=S.door2;
+    const remainH = d.h * (1 - d.openProgress);
+    const curY    = d.y + d.h - remainH;
+    if(remainH > 4) pushOut(p, d.x, curY, d.w, remainH);
+  }
+
+  // ── DEATH CHECKS ──────────────────────────────────────
+
+  // gears (circle body + teeth tips)
+  for(const g of S.gears){
+    const dist=Math.hypot(p.x-g.x,p.y-g.y);
+    if(dist < g.outerR*0.65 + p.r){ die(); return; }
+    for(let i=0;i<g.teeth;i++){
+      const a=g.angle + (i/g.teeth)*Math.PI*2;
+      const tx=g.x+Math.cos(a)*g.outerR;
+      const ty=g.y+Math.sin(a)*g.outerR;
+      if(Math.hypot(p.x-tx,p.y-ty)<p.r+5){ die(); return; }
+    }
+  }
+
+  // spinning blades
+  for(const b of S.blades){
+    for(let i=0;i<4;i++){
+      const a=b.angle+i*Math.PI/2;
+      const tx=b.x+Math.cos(a)*b.armR, ty=b.y+Math.sin(a)*b.armR;
+      if(circleLine(p.x,p.y,p.r, b.x,b.y,tx,ty)){ die(); return; }
+    }
+  }
+
+  // pendulum blade collision (arm line + tip circle)
+  {
+    const pd = S.pendulum;
+    const tipX = pd.pivotX + Math.sin(pd.angle) * pd.armLen;
+    const tipY = pd.pivotY + Math.cos(pd.angle) * pd.armLen;
+    if(circleLine(p.x,p.y,p.r, pd.pivotX, pd.pivotY, tipX, tipY)){ die(); return; }
+    if(Math.hypot(p.x-tipX, p.y-tipY) < p.r+12){ die(); return; }
+  }
+
+  // top spikes
+  for(const sp of S.topSpikes){
+    const spikeH=18;
+    if(Math.abs(p.x-sp.x)<p.r+8 && p.y < WALL+spikeH+p.r){ die(); return; }
+  }
+
+  // gravity spike plates
+  for(const gs of S.gravitySpikes){
+    const plateRect = { x:gs.x, y:gs.currentY, w:gs.w, h:gs.plateH+gs.spikeH };
+    if(circleRect(p.x,p.y,p.r, plateRect.x,plateRect.y,plateRect.w,plateRect.h)){ die(); return; }
+  }
+
+  // pulse zones
+  for(const pz of S.pulseZones){
+    if(pz.on && circleRect(p.x,p.y,p.r, pz.x,pz.y,pz.w,pz.h)){ die(); return; }
+  }
+
+  // win
+  const eb=S.endBox;
+  if(p.x>eb.x && p.x<eb.x+eb.w && p.y>eb.y && p.y<eb.y+eb.h){
+    p.won=true;
+    burst(p.x,p.y,'#f1c40f'); burst(W-30,30,'#f1c40f');
+    showEnd(true); return;
+  }
+
+  // particles
+  particles.forEach(pt=>{ pt.x+=pt.vx; pt.y+=pt.vy; pt.vx*=0.93; pt.vy*=0.93; pt.life-=pt.decay; });
+  particles=particles.filter(pt=>pt.life>0);
+}
+
+function die(){
+  const p=S.player;
+  if(p.dead) return;
+  p.dead=true; p.deathTimer=1.0;
+  burst(p.x,p.y,'#c0392b');
+}
+function showEnd(won){
+  const ov=document.getElementById('overlay');
+  ov.style.display='flex';
+  ov.style.flexDirection='column';
+  document.getElementById('overlay-msg').textContent = won?'🎉 第二关通过！':'💀 阵亡！再战！';
+  document.getElementById('restart-btn').style.display='block';
+  if(won){
+    document.getElementById('next-btn').style.display='block';
+    document.getElementById('level1-btn').style.display='block';
+  }
+}
+function restartGame(){
+  S=initState();
+  particles=[];
+  lastTime=0;
+  document.getElementById('overlay').style.display='none';
+  document.getElementById('restart-btn').style.display='none';
+  document.getElementById('level1-btn').style.display='none';
+  document.getElementById('timer-warning').style.display='none';
+  requestAnimationFrame(loop);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW HELPERS  (sketch style — same as level 1)
+// ─────────────────────────────────────────────────────────────────
+function setInk(color='#1a0e05', width=1.8){
+  ctx.strokeStyle=color; ctx.lineWidth=width; ctx.fillStyle=color;
+}
+
+function drawGearSketch(g){
+  const {x,y,outerR,teeth,angle} = g;
+  const innerR = outerR*0.62;
+  ctx.save();
+  ctx.translate(x,y);
+
+  setInk('#1a0e05',1.6);
+  ctx.beginPath();
+  for(let i=0;i<teeth;i++){
+    const a0=(i/teeth)*Math.PI*2 + angle;
+    const a1=((i+0.3)/teeth)*Math.PI*2 + angle;
+    const a2=((i+0.7)/teeth)*Math.PI*2 + angle;
+    const a3=((i+1)/teeth)*Math.PI*2 + angle;
+    if(i===0) ctx.moveTo(Math.cos(a0)*innerR, Math.sin(a0)*innerR);
+    else ctx.lineTo(Math.cos(a0)*innerR, Math.sin(a0)*innerR);
+    ctx.lineTo(Math.cos(a1)*outerR, Math.sin(a1)*outerR);
+    ctx.lineTo(Math.cos(a2)*outerR, Math.sin(a2)*outerR);
+    ctx.lineTo(Math.cos(a3)*innerR, Math.sin(a3)*innerR);
+  }
+  ctx.closePath();
+  ctx.fillStyle='rgba(180,160,120,0.55)';
+  ctx.fill();
+  setInk('#1a0e05',1.8);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0,0,innerR,0,Math.PI*2);
+  ctx.fillStyle='rgba(200,185,145,0.5)';
+  ctx.fill();
+  setInk('#1a0e05',1.4);
+  ctx.stroke();
+
+  setInk('#1a0e05',1.2);
+  for(let i=0;i<4;i++){
+    const a=angle+i*Math.PI/2;
+    sketchLine(0,0,Math.cos(a)*innerR*0.85,Math.sin(a)*innerR*0.85);
+  }
+
+  ctx.beginPath();
+  ctx.arc(0,0,outerR*0.13,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05';
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawBladeSketch(b){
+  ctx.save();
+  ctx.translate(b.x,b.y);
+  ctx.rotate(b.angle);
+  setInk('#1a0e05',1.6);
+  for(let i=0;i<4;i++){
+    ctx.save();
+    ctx.rotate(i*Math.PI/2);
+    ctx.beginPath();
+    ctx.moveTo(0,-3);
+    ctx.lineTo(b.armR, 0);
+    ctx.lineTo(0, 3);
+    ctx.closePath();
+    ctx.fillStyle='rgba(160,140,100,0.7)';
+    ctx.fill();
+    setInk('#1a0e05',1.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0,0,4,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+  ctx.restore();
+}
+
+function drawTopSpikes(){
+  const SPIKE_W=18, SPIKE_H=18;
+  S.topSpikes.forEach(sp=>{
+    ctx.beginPath();
+    ctx.moveTo(sp.x - SPIKE_W/2, WALL);
+    ctx.lineTo(sp.x + SPIKE_W/2, WALL);
+    ctx.lineTo(sp.x, WALL + SPIKE_H);
+    ctx.closePath();
+    ctx.fillStyle='rgba(40,28,15,0.85)';
+    ctx.fill();
+    setInk('#1a0e05',1.0);
+    ctx.stroke();
+  });
+}
+
+function drawGravitySpikePlate(gs){
+  const plateTop = gs.currentY;
+  const cx = gs.x + gs.w/2;
+
+  const ropeX = cx;
+  const ropeLen = plateTop - gs.ropeTop;
+  if(ropeLen > 2){
+    setInk('#3a2510', 2.0);
+    sketchLine(ropeX-3, gs.ropeTop, ropeX-3, plateTop, 2);
+    sketchLine(ropeX+3, gs.ropeTop, ropeX+3, plateTop, 2);
+    setInk('#3a2510', 0.8);
+    const hatchStep = 8;
+    for(let yy = gs.ropeTop+4; yy < plateTop; yy += hatchStep){
+      sketchLine(ropeX-3, yy, ropeX+3, yy+4, 1);
+    }
+  }
+
+  ctx.fillStyle='rgba(70,50,28,0.90)';
+  ctx.fillRect(gs.x, plateTop, gs.w, gs.plateH);
+  setInk('#1a0e05', 2.2);
+  sketchRect(gs.x, plateTop, gs.w, gs.plateH, 3);
+
+  setInk('#1a0e05', 1.0);
+  for(let xx=gs.x+10; xx<gs.x+gs.w-5; xx+=20){
+    ctx.beginPath(); ctx.arc(xx, plateTop+gs.plateH/2, 2.5, 0, Math.PI*2);
+    ctx.fillStyle='#1a0e05'; ctx.fill();
+  }
+
+  const SPIKE_W = 16;
+  const count = Math.floor(gs.w / SPIKE_W);
+  const spikeBaseY = plateTop + gs.plateH;
+  for(let i=0; i<count; i++){
+    const sx = gs.x + i*SPIKE_W + SPIKE_W/2;
+    ctx.beginPath();
+    ctx.moveTo(sx - SPIKE_W/2, spikeBaseY);
+    ctx.lineTo(sx + SPIKE_W/2, spikeBaseY);
+    ctx.lineTo(sx,             spikeBaseY + gs.spikeH);
+    ctx.closePath();
+    ctx.fillStyle='rgba(45,28,12,0.88)';
+    ctx.fill();
+    setInk('#1a0e05', 1.2);
+    ctx.stroke();
+  }
+
+  if(!gs.fallen && !gs.falling){
+    const sinceOpen = S.doorOpenedAt !== null ? S.elapsed - S.doorOpenedAt : 0;
+    const remaining = S.doorOpenedAt === null
+      ? null
+      : Math.max(0, Math.ceil(S.spikeDropDelay - sinceOpen));
+    ctx.textAlign='center';
+    if(remaining === null){
+      ctx.fillStyle='rgba(80,55,25,0.7)';
+      ctx.font='12px Courier New';
+      ctx.fillText('🔒', cx, gs.ropeTop - 1);
+    } else {
+      ctx.fillStyle = remaining <= 3 ? '#8b0000' : '#5a3010';
+      ctx.font = `bold ${remaining<=3?14:11}px Courier New`;
+      ctx.fillText(`${remaining}s`, cx, gs.ropeTop - 1);
+    }
+  }
+}
+
+function drawPulseZone(pz){
+  const {x,y,w,h,on} = pz;
+  const seg=16, steps=Math.floor(w/seg);
+  ctx.beginPath();
+  ctx.moveTo(x, y+h/2);
+  for(let i=0;i<=steps;i++){
+    ctx.lineTo(x+i*seg, y+(i%2===0?0:h));
+  }
+  if(on){
+    ctx.shadowColor='#c0392b'; ctx.shadowBlur=10;
+    ctx.strokeStyle='#c0392b'; ctx.lineWidth=3;
+  } else {
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='rgba(50,35,20,0.55)'; ctx.lineWidth=1.5;
+    ctx.setLineDash([5,4]);
+  }
+  ctx.stroke();
+  ctx.shadowBlur=0; ctx.setLineDash([]);
+}
+
+// Generic lever draw — accepts lever object + reference to state for proximity hint
+function drawLeverObj(lev, label){
+  const {x, y, armLen, angle, activated} = lev;
+  const floorY = y;
+
+  const baseW = 22, baseH = 10;
+  ctx.fillStyle = 'rgba(100,75,45,0.92)';
+  ctx.fillRect(x - baseW/2, floorY - baseH, baseW, baseH);
+  setInk('#1a0e05', 2.0);
+  sketchRect(x - baseW/2, floorY - baseH, baseW, baseH, 2);
+  setInk('#1a0e05', 1.0);
+  [-7, 7].forEach(ox => {
+    ctx.beginPath(); ctx.arc(x+ox, floorY-2, 2.5, 0, Math.PI*2);
+    ctx.fillStyle='#1a0e05'; ctx.fill();
+  });
+
+  const pivotY = floorY - baseH;
+  ctx.beginPath(); ctx.arc(x, pivotY, 5.5, 0, Math.PI*2);
+  ctx.fillStyle='rgba(80,60,35,0.95)'; ctx.fill();
+  setInk('#1a0e05', 1.5); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x-1, pivotY-1, 2, 0, Math.PI*2);
+  ctx.fillStyle='rgba(200,165,100,0.7)'; ctx.fill();
+
+  const tx = x + Math.cos(angle) * armLen;
+  const ty = pivotY + Math.sin(angle) * armLen;
+  ctx.beginPath(); ctx.moveTo(x+1, pivotY+1); ctx.lineTo(tx+1, ty+1);
+  ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.lineWidth=5; ctx.stroke();
+  setInk('#1a0e05', 4.5);
+  ctx.beginPath(); ctx.moveTo(x, pivotY); ctx.lineTo(tx, ty); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x-0.8, pivotY); ctx.lineTo(tx-0.8, ty);
+  ctx.strokeStyle='rgba(180,145,90,0.5)'; ctx.lineWidth=1.5; ctx.stroke();
+
+  const handleW = 14;
+  const perpAngle = angle + Math.PI/2;
+  const hx1 = tx + Math.cos(perpAngle)*handleW/2;
+  const hy1 = ty + Math.sin(perpAngle)*handleW/2;
+  const hx2 = tx - Math.cos(perpAngle)*handleW/2;
+  const hy2 = ty - Math.sin(perpAngle)*handleW/2;
+  setInk('#1a0e05', 3.5);
+  ctx.beginPath(); ctx.moveTo(hx1,hy1); ctx.lineTo(hx2,hy2); ctx.stroke();
+  [hx1,hx2].forEach((hx,i)=>{
+    const hy = i===0?hy1:hy2;
+    ctx.beginPath(); ctx.arc(hx,hy,5,0,Math.PI*2);
+    ctx.fillStyle = activated ? 'rgba(60,40,15,0.95)' : 'rgba(155,115,65,0.95)';
+    ctx.fill();
+    setInk('#1a0e05',1.5); ctx.stroke();
+  });
+
+  setInk('rgba(80,55,25,0.4)', 1.0);
+  ctx.beginPath();
+  ctx.arc(x, pivotY, armLen*0.35, -Math.PI*0.85, -Math.PI*0.15);
+  ctx.stroke();
+  if(!activated){
+    ctx.fillStyle='rgba(80,55,25,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(x + armLen*0.35*Math.cos(-Math.PI*0.15) - 4,
+               pivotY + armLen*0.35*Math.sin(-Math.PI*0.15));
+    ctx.lineTo(x + armLen*0.35*Math.cos(-Math.PI*0.15) + 2,
+               pivotY + armLen*0.35*Math.sin(-Math.PI*0.15) - 5);
+    ctx.lineTo(x + armLen*0.35*Math.cos(-Math.PI*0.15) + 4,
+               pivotY + armLen*0.35*Math.sin(-Math.PI*0.15) + 3);
+    ctx.fill();
+  }
+
+  if(!activated){
+    const pDist = Math.hypot(S.player.x - x, S.player.y - pivotY);
+    if(pDist < 80){
+      ctx.fillStyle='rgba(50,30,10,0.88)';
+      ctx.font='bold 11px Courier New'; ctx.textAlign='center';
+      ctx.fillText(label || 'E — 拉动', x, pivotY - armLen - 10);
+    }
+  }
+}
+
+// ── Vertical gear rail (from level 1) ──
+function drawGearRail(g){
+  if(g.moveAxis !== 'y') return;
+  if(!g.railX) return;
+  const rx = g.railX;
+  const rTop = g.railTop, rBot = g.railBottom;
+  const RW = 8;
+
+  const grad = ctx.createLinearGradient(rx-RW,0,rx+RW,0);
+  grad.addColorStop(0,'rgba(90,70,45,0.75)');
+  grad.addColorStop(0.45,'rgba(175,148,100,0.8)');
+  grad.addColorStop(0.55,'rgba(175,148,100,0.8)');
+  grad.addColorStop(1,'rgba(90,70,45,0.75)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(rx-RW, rTop, RW*2, rBot-rTop);
+
+  setInk('#1a0e05', 1.4);
+  sketchLine(rx-RW, rTop, rx-RW, rBot, 2);
+  sketchLine(rx+RW, rTop, rx+RW, rBot, 2);
+
+  setInk('#1a0e05', 1.0);
+  for(let yy = rTop+18; yy < rBot-10; yy += 30){
+    sketchLine(rx-RW, yy, rx+RW, yy, 1);
+    ctx.beginPath(); ctx.arc(rx-RW+3, yy, 2, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(rx+RW-3, yy, 2, 0, Math.PI*2); ctx.fill();
+  }
+
+  ctx.fillStyle='rgba(80,60,38,0.9)';
+  ctx.fillRect(rx-RW-3, rTop, RW*2+6, 10);
+  ctx.fillRect(rx-RW-3, rBot-10, RW*2+6, 10);
+  setInk('#1a0e05', 1.5);
+  sketchRect(rx-RW-3, rTop, RW*2+6, 10, 2);
+  sketchRect(rx-RW-3, rBot-10, RW*2+6, 10, 2);
+
+  const BW = 16, BH = 18;
+  const by = g.y - BH/2;
+  ctx.fillStyle='rgba(140,110,65,0.85)';
+  ctx.fillRect(rx-BW/2, by, BW, BH);
+  setInk('#1a0e05', 1.8);
+  sketchRect(rx-BW/2, by, BW, BH, 2);
+  ctx.beginPath(); ctx.arc(rx, g.y, 3.5, 0, Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+  setInk('#1a0e05', 2.2);
+  sketchLine(rx, g.y, g.x, g.y, 2);
+  ctx.beginPath(); ctx.arc(g.x, g.y, 4, 0, Math.PI*2);
+  ctx.fillStyle='rgba(100,80,50,0.9)'; ctx.fill();
+  setInk('#1a0e05',1.2); ctx.stroke();
+}
+
+// ── NEW: Horizontal gear rail ──
+function drawGearRailH(g){
+  if(g.moveAxis !== 'x') return;
+  const ry = g.railY;
+  const rLeft = g.railLeft, rRight = g.railRight;
+  const RH = 8; // rail half-height
+
+  // rail fill gradient (horizontal)
+  const grad = ctx.createLinearGradient(0, ry-RH, 0, ry+RH);
+  grad.addColorStop(0,'rgba(90,70,45,0.75)');
+  grad.addColorStop(0.45,'rgba(175,148,100,0.8)');
+  grad.addColorStop(0.55,'rgba(175,148,100,0.8)');
+  grad.addColorStop(1,'rgba(90,70,45,0.75)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(rLeft, ry-RH, rRight-rLeft, RH*2);
+
+  // top & bottom rail edges
+  setInk('#1a0e05', 1.4);
+  sketchLine(rLeft, ry-RH, rRight, ry-RH, 2);
+  sketchLine(rLeft, ry+RH, rRight, ry+RH, 2);
+
+  // cross-ties (vertical rivet marks along the rail)
+  setInk('#1a0e05', 1.0);
+  for(let xx = rLeft+18; xx < rRight-10; xx += 30){
+    sketchLine(xx, ry-RH, xx, ry+RH, 1);
+    ctx.beginPath(); ctx.arc(xx, ry-RH+3, 2, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(xx, ry+RH-3, 2, 0, Math.PI*2); ctx.fill();
+  }
+
+  // left & right anchor blocks
+  ctx.fillStyle='rgba(80,60,38,0.9)';
+  ctx.fillRect(rLeft,    ry-RH-3, 10, RH*2+6);
+  ctx.fillRect(rRight-10, ry-RH-3, 10, RH*2+6);
+  setInk('#1a0e05', 1.5);
+  sketchRect(rLeft,    ry-RH-3, 10, RH*2+6, 2);
+  sketchRect(rRight-10, ry-RH-3, 10, RH*2+6, 2);
+
+  // sliding bracket — horizontal position follows gear x
+  const BW = 18, BH = 16;
+  const bx = g.x - BW/2;
+  ctx.fillStyle='rgba(140,110,65,0.85)';
+  ctx.fillRect(bx, ry-BH/2, BW, BH);
+  setInk('#1a0e05', 1.8);
+  sketchRect(bx, ry-BH/2, BW, BH, 2);
+  // bracket bolt center
+  ctx.beginPath(); ctx.arc(g.x, ry, 3.5, 0, Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+
+  // connecting arm: vertical from bracket to gear center
+  setInk('#1a0e05', 2.2);
+  sketchLine(g.x, ry, g.x, g.y, 2);
+  // arm rivet at gear side
+  ctx.beginPath(); ctx.arc(g.x, g.y, 4, 0, Math.PI*2);
+  ctx.fillStyle='rgba(100,80,50,0.9)'; ctx.fill();
+  setInk('#1a0e05',1.2); ctx.stroke();
+}
+
+function drawDoorObj(d){
+  const prog = d.openProgress;
+  if(prog >= 1) return;
+
+  const remainH = d.h * (1 - prog);
+  const curY    = d.y + d.h - remainH;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(d.x - 2, curY, d.w + 4, remainH);
+  ctx.clip();
+
+  ctx.fillStyle = `rgba(120,95,60,${0.85 - prog*0.3})`;
+  ctx.fillRect(d.x, d.y, d.w, d.h);
+
+  setInk(`rgba(26,14,5,${0.55 - prog*0.2})`, 0.7);
+  for(let yy=d.y+8; yy<d.y+d.h; yy+=14){
+    sketchLine(d.x+2, yy, d.x+d.w-2, yy, 1);
+  }
+
+  setInk(`rgba(26,14,5,${0.9 - prog*0.4})`, 2.2);
+  sketchRect(d.x, d.y, d.w, d.h, 2);
+
+  if(prog > 0 && prog < 1){
+    const sparkY = curY + 2;
+    for(let i=0; i<2; i++){
+      ctx.beginPath();
+      ctx.arc(d.x + Math.random()*d.w, sparkY, 1.5+Math.random()*2, 0, Math.PI*2);
+      ctx.fillStyle=`rgba(255,${180+Math.random()*75|0},0,${0.6+Math.random()*0.4})`;
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawRod(r){
+  const grad=ctx.createLinearGradient(r.x,0,r.x+r.w,0);
+  grad.addColorStop(0,  'rgba(55,42,28,0.9)');
+  grad.addColorStop(0.3,'rgba(155,128,85,0.9)');
+  grad.addColorStop(0.5,'rgba(195,165,110,0.95)');
+  grad.addColorStop(0.7,'rgba(155,128,85,0.9)');
+  grad.addColorStop(1,  'rgba(55,42,28,0.9)');
+  ctx.fillStyle=grad;
+  ctx.fillRect(r.x,r.y,r.w,r.h);
+  setInk('#1a0e05',2.5);
+  sketchRect(r.x,r.y,r.w,r.h,3);
+  setInk('#1a0e05',1.2);
+  for(let yy=r.y+18;yy<r.y+r.h-10;yy+=28){
+    ctx.beginPath(); ctx.arc(r.x+r.w/2,yy,3.5,0,Math.PI*2);
+    ctx.fillStyle='#1a0e05'; ctx.fill();
+    ctx.beginPath(); ctx.arc(r.x+r.w/2,yy,1.5,0,Math.PI*2);
+    ctx.fillStyle='rgba(200,170,110,0.8)'; ctx.fill();
+  }
+}
+
+function drawBarrierWall(bw){
+  ctx.fillStyle='rgba(70,50,30,0.92)';
+  ctx.fillRect(bw.x,bw.y,bw.w,bw.h);
+  const brickH=16;
+  for(let yy=bw.y; yy<bw.y+bw.h; yy+=brickH){
+    setInk('rgba(35,22,10,0.6)',0.8);
+    sketchLine(bw.x,yy,bw.x+bw.w,yy,1);
+    ctx.fillStyle=`rgba(${85+Math.sin(yy)*8|0},${60+Math.sin(yy)*5|0},35,0.6)`;
+    ctx.fillRect(bw.x+1,yy+1,bw.w-2,brickH-2);
+  }
+  setInk('#1a0e05',3.0);
+  sketchRect(bw.x,bw.y,bw.w,bw.h,3);
+  ctx.fillStyle='rgba(90,65,38,0.95)';
+  ctx.fillRect(bw.x-3,bw.y,bw.w+6,8);
+  setInk('#1a0e05',1.8);
+  sketchRect(bw.x-3,bw.y,bw.w+6,8,2);
+}
+
+function drawBorders(){
+  ctx.fillStyle='rgba(80,60,40,0.9)';
+  ctx.fillRect(0,0,W,WALL);
+  ctx.fillRect(0,H-WALL,W,WALL);
+  ctx.fillRect(0,0,WALL,H);
+  ctx.fillRect(W-WALL,0,WALL,H);
+  setInk('#1a0e05',2.5);
+  sketchRect(0,0,W,H,3);
+  sketchRect(2,2,W-4,H-4,2);
+}
+
+function drawStartEnd(){
+  const sb=S.startBox;
+  setInk('rgba(50,120,50,0.6)',1.5);
+  ctx.setLineDash([4,3]);
+  sketchRect(sb.x,sb.y,sb.w,sb.h,2);
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(40,100,40,0.65)';
+  ctx.font='bold 10px Courier New'; ctx.textAlign='center';
+  ctx.fillText('START', sb.x+sb.w/2, sb.y+sb.h/2+4);
+
+  const eb=S.endBox;
+  setInk('rgba(160,90,20,0.7)',1.5);
+  ctx.setLineDash([4,3]);
+  sketchRect(eb.x,eb.y,eb.w,eb.h,2);
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(140,80,10,0.8)';
+  ctx.font='bold 10px Courier New'; ctx.textAlign='center';
+  ctx.fillText('END', eb.x+eb.w/2, eb.y+eb.h/2+4);
+}
+
+// ── NEW: Pendulum blade draw ──
+function drawPendulum(){
+  const pd = S.pendulum;
+  const tipX = pd.pivotX + Math.sin(pd.angle) * pd.armLen;
+  const tipY = pd.pivotY + Math.cos(pd.angle) * pd.armLen;
+
+  ctx.save();
+
+  // arm shadow
+  ctx.beginPath(); ctx.moveTo(pd.pivotX+2, pd.pivotY+2); ctx.lineTo(tipX+2, tipY+2);
+  ctx.strokeStyle='rgba(0,0,0,0.22)'; ctx.lineWidth=6; ctx.stroke();
+
+  // arm body (thick rod style)
+  setInk('#1a0e05', 5);
+  ctx.beginPath(); ctx.moveTo(pd.pivotX, pd.pivotY); ctx.lineTo(tipX, tipY); ctx.stroke();
+
+  // highlight stripe on arm
+  ctx.beginPath();
+  ctx.moveTo(pd.pivotX - Math.cos(pd.angle)*1.2, pd.pivotY - Math.sin(pd.angle)*1.2);
+  ctx.lineTo(tipX      - Math.cos(pd.angle)*1.2, tipY      - Math.sin(pd.angle)*1.2);
+  ctx.strokeStyle='rgba(180,145,90,0.45)'; ctx.lineWidth=1.5; ctx.stroke();
+
+  // rivets along arm
+  setInk('#1a0e05', 1.0);
+  for(let t=0.25; t<=0.75; t+=0.25){
+    const rx = pd.pivotX + Math.sin(pd.angle)*pd.armLen*t;
+    const ry = pd.pivotY + Math.cos(pd.angle)*pd.armLen*t;
+    ctx.beginPath(); ctx.arc(rx, ry, 2.5, 0, Math.PI*2);
+    ctx.fillStyle='rgba(200,170,110,0.8)'; ctx.fill();
+    setInk('#1a0e05',0.8); ctx.stroke();
+  }
+
+  // pivot axle at ceiling
+  ctx.beginPath(); ctx.arc(pd.pivotX, pd.pivotY, 7, 0, Math.PI*2);
+  ctx.fillStyle='rgba(70,52,32,0.95)'; ctx.fill();
+  setInk('#1a0e05', 1.6); ctx.stroke();
+  ctx.beginPath(); ctx.arc(pd.pivotX-1, pd.pivotY-1, 2.5, 0, Math.PI*2);
+  ctx.fillStyle='rgba(200,165,100,0.7)'; ctx.fill();
+
+  // 4-pointed star spike at tip
+  ctx.save();
+  ctx.translate(tipX, tipY);
+  ctx.rotate(pd.angle); // tilt with arm
+  const SR = 12; // spike reach
+  ctx.beginPath();
+  // diamond/star: 4 points at ±SR along axes, inner at ±SR*0.4 diagonals
+  const star = [
+    [0, -SR], [SR*0.3, -SR*0.3], [SR, 0], [SR*0.3, SR*0.3],
+    [0,  SR], [-SR*0.3, SR*0.3], [-SR,0], [-SR*0.3,-SR*0.3]
+  ];
+  ctx.moveTo(star[0][0], star[0][1]);
+  for(let i=1;i<star.length;i++) ctx.lineTo(star[i][0], star[i][1]);
+  ctx.closePath();
+  ctx.fillStyle='rgba(45,28,12,0.92)';
+  ctx.fill();
+  setInk('#1a0e05', 1.8);
+  ctx.stroke();
+
+  // center rivet on tip
+  ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, Math.PI*2);
+  ctx.fillStyle='rgba(200,170,110,0.8)'; ctx.fill();
+  setInk('#1a0e05',1.0); ctx.stroke();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawPlayer(){
+  const p=S.player;
+  if(p.dead && Math.floor(p.deathTimer*12)%2===0) return;
+  ctx.save();
+  ctx.translate(p.x,p.y);
+
+  setInk('#1a0e05',2);
+  ctx.beginPath();
+  ctx.arc(0,0,p.r,0,Math.PI*2);
+  ctx.fillStyle = p.won ? 'rgba(220,180,50,0.9)' : 'rgba(200,230,230,0.9)';
+  ctx.fill(); ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(2,-1,p.r*0.5,0,Math.PI*2);
+  ctx.fillStyle='rgba(100,180,200,0.55)';
+  ctx.fill();
+  setInk('#1a0e05',1);
+  ctx.stroke();
+
+  ctx.beginPath(); ctx.arc(3,-1,2.5,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+
+  setInk('rgba(200,120,20,0.8)',1.5);
+  const thrx=-p.r-2;
+  ctx.beginPath();
+  ctx.moveTo(thrx,0);
+  ctx.quadraticCurveTo(thrx-5,-4, thrx-8+Math.random()*4, -2+Math.random()*4);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawParticles(){
+  particles.forEach(pt=>{
+    ctx.globalAlpha=pt.life*0.85;
+    ctx.fillStyle=pt.color;
+    ctx.beginPath();
+    ctx.arc(pt.x,pt.y,pt.r*pt.life,0,Math.PI*2);
+    ctx.fill();
+  });
+  ctx.globalAlpha=1;
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  MAIN DRAW
+// ─────────────────────────────────────────────────────────────────
+function draw(){
+  ctx.drawImage(paperCanvas,0,0);
+
+  drawBorders();
+  drawStartEnd();
+
+  // solid rods (divider posts)
+  S.rods.forEach(drawRod);
+  S.hWalls.forEach(r=>{
+    ctx.fillStyle='rgba(120,95,65,0.75)'; ctx.fillRect(r.x,r.y,r.w,r.h);
+    setInk('#1a0e05',1.5); sketchRect(r.x,r.y,r.w,r.h,2);
+  });
+
+  // barrier walls (permanent lower dividers)
+  drawBarrierWall(S.barrierWall1);
+  drawBarrierWall(S.barrierWall2);
+
+  // pulse zones
+  S.pulseZones.forEach(drawPulseZone);
+
+  // levers
+  drawLeverObj(S.lever1, 'E — 拉杆1');
+  drawLeverObj(S.lever2, 'E — 拉杆2');
+
+  // doors
+  drawDoorObj(S.door1);
+  drawDoorObj(S.door2);
+
+  // gear rails (drawn behind gears)
+  S.gears.forEach(g=>{
+    if(g.moveAxis==='y') drawGearRail(g);
+    if(g.moveAxis==='x') drawGearRailH(g);
+  });
+
+  // gears
+  S.gears.forEach(drawGearSketch);
+
+  // spinning blades
+  S.blades.forEach(drawBladeSketch);
+
+  // pendulum
+  drawPendulum();
+
+  // fixed top spikes
+  drawTopSpikes();
+
+  // gravity spike plate
+  S.gravitySpikes.forEach(drawGravitySpikePlate);
+
+  // player
+  drawPlayer();
+
+  // particles
+  drawParticles();
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  LOOP
+// ─────────────────────────────────────────────────────────────────
+function loop(ts){
+  const dt = lastTime ? Math.min((ts-lastTime)/1000, 0.05) : 0.016;
+  lastTime = ts;
+  const p=S.player;
+  const running = !(p.dead && p.deathTimer<=0) && !p.won;
+  update(dt);
+  draw();
+  if(running) requestAnimationFrame(loop);
+  else draw();
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

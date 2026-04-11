@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>闯关游戏 · 隐藏关：迷宫</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #1a0e05;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  min-height: 100vh;
+  font-family: 'Courier New', monospace;
+}
+#ui {
+  color: #c8a87a;
+  margin-bottom: 8px;
+  font-size: 13px;
+  display: flex; gap: 16px; align-items: center;
+}
+#level-label {
+  font-weight: bold; color: #c084e8;
+  background: rgba(20,8,30,0.85);
+  border: 1px solid #8e44ad;
+  padding: 2px 10px;
+}
+#back-link {
+  font-size: 12px; color: #c8a87a;
+  background: rgba(20,8,30,0.7);
+  border: 1px solid #5a3a7a;
+  padding: 2px 8px; cursor: pointer;
+  text-decoration: none;
+}
+#back-link:hover { background: #3a1a5a; }
+#canvas-wrap {
+  position: relative;
+  box-shadow: 0 0 40px rgba(142,68,173,0.4);
+}
+canvas { display: block; }
+#overlay {
+  position: absolute; inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 10;
+  background: rgba(10,4,20,0.90);
+}
+#overlay-msg {
+  font-size: 32px; font-weight: bold;
+  color: #d4a8ff;
+  font-family: 'Courier New', monospace;
+  text-align: center;
+  white-space: pre-line;
+}
+#restart-btn {
+  margin-top: 18px; padding: 10px 28px;
+  font-size: 15px; font-family: 'Courier New', monospace;
+  background: #1a0e2a; border: 2px solid #8e44ad;
+  cursor: pointer; color: #d4a8ff; font-weight: bold;
+  display: none; pointer-events: all;
+}
+#restart-btn:hover { background: #3a1a5a; }
+#back-btn {
+  margin-top: 10px; padding: 8px 22px;
+  font-size: 13px; font-family: 'Courier New', monospace;
+  background: #1a0e2a; border: 2px solid #5a3a7a;
+  cursor: pointer; color: #c8a87a;
+  display: none; pointer-events: all;
+  text-decoration: none;
+}
+#back-btn:hover { background: #2a1040; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <span id="level-label">🔮 隐藏关 · 黑暗迷宫</span>
+  <a id="back-link" href="game-level4.html">← 返回第四关</a>
+  <span>WASD / 方向键 移动</span>
+  <span id="timer-display">⏱ 00:00</span>
+</div>
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <div id="overlay-msg"></div>
+    <button id="restart-btn" onclick="restartGame()">再试一次</button>
+    <a id="back-btn" href="game-level4.html">← 返回第四关</a>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+const W = 900, H = 560;
+canvas.width  = W;
+canvas.height = H;
+
+// ── MAZE GENERATION (recursive backtracker) ──────────────────────
+const COLS = 15, ROWS = 9, CELL = 56;
+// Center the maze
+const OX = Math.floor((W - COLS*CELL)/2);
+const OY = Math.floor((H - ROWS*CELL)/2);
+
+// passage[r][c] = {n,e,s,w}  true = passage (no wall), false = wall
+function generateMaze(){
+  const p = Array.from({length:ROWS}, ()=>
+    Array.from({length:COLS}, ()=>({n:false,e:false,s:false,w:false}))
+  );
+  const visited = Array.from({length:ROWS}, ()=>new Array(COLS).fill(false));
+
+  function carve(r,c){
+    visited[r][c]=true;
+    const dirs = [{dr:-1,dc:0,d:'n',od:'s'},{dr:1,dc:0,d:'s',od:'n'},
+                  {dr:0,dc:-1,d:'w',od:'e'},{dr:0,dc:1,d:'e',od:'w'}];
+    // shuffle
+    for(let i=dirs.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [dirs[i],dirs[j]]=[dirs[j],dirs[i]];
+    }
+    for(const {dr,dc,d,od} of dirs){
+      const nr=r+dr, nc=c+dc;
+      if(nr<0||nr>=ROWS||nc<0||nc>=COLS||visited[nr][nc]) continue;
+      p[r][c][d]=true;   // open passage from current
+      p[nr][nc][od]=true; // open passage from neighbor
+      carve(nr,nc);
+    }
+  }
+  carve(0,0);
+  return p;
+}
+
+// ── STATE ────────────────────────────────────────────────────────
+let keys={}, particles=[], lastTime=0;
+let passage, fog;
+
+function cellCenter(r,c){
+  return { x: OX + c*CELL + CELL/2, y: OY + r*CELL + CELL/2 };
+}
+
+// Ghost traps — patrol along rows/cols
+function buildTraps(){
+  return [
+    { x: OX+3*CELL+CELL/2, y: OY+2*CELL+CELL/2, vx:1.3, vy:0,
+      minX: OX+CELL/2, maxX: OX+5*CELL+CELL/2, r:8 },
+    { x: OX+9*CELL+CELL/2, y: OY+5*CELL+CELL/2, vx:0, vy:1.1,
+      minY: OY+3*CELL+CELL/2, maxY: OY+8*CELL+CELL/2, r:8 },
+    { x: OX+12*CELL+CELL/2, y: OY+1*CELL+CELL/2, vx:1.5, vy:0,
+      minX: OX+10*CELL+CELL/2, maxX: OX+14*CELL+CELL/2, r:8 },
+  ];
+}
+
+function initState(){
+  passage = generateMaze();
+  fog = Array.from({length:ROWS},()=>new Array(COLS).fill(false));
+  // reveal start
+  fog[0][0]=true; fog[0][1]=true; fog[1][0]=true;
+
+  const sc = cellCenter(0, 0);
+  return {
+    elapsed: 0,
+    player: { x:sc.x, y:sc.y, r:9, dead:false, won:false, deathTimer:0 },
+    traps: buildTraps(),
+    glowT: 0,
+  };
+}
+
+let S = initState();
+
+// ── INPUT ────────────────────────────────────────────────────────
+document.addEventListener('keydown',e=>{keys[e.key]=true; e.preventDefault();});
+document.addEventListener('keyup',  e=>{keys[e.key]=false;});
+function inputDir(){
+  const SPD=2.4;
+  let dx=0,dy=0;
+  if(keys['ArrowLeft'] ||keys['a']||keys['A']) dx-=SPD;
+  if(keys['ArrowRight']||keys['d']||keys['D']) dx+=SPD;
+  if(keys['ArrowUp']   ||keys['w']||keys['W']) dy-=SPD;
+  if(keys['ArrowDown'] ||keys['s']||keys['S']) dy+=SPD;
+  return {dx,dy};
+}
+
+// ── COLLISION ────────────────────────────────────────────────────
+const WT = 5; // wall thickness
+
+function circleRect(cx,cy,cr,rx,ry,rw,rh){
+  const nx=Math.max(rx,Math.min(cx,rx+rw));
+  const ny=Math.max(ry,Math.min(cy,ry+rh));
+  return (cx-nx)**2+(cy-ny)**2<cr*cr;
+}
+function pushOut(p,rx,ry,rw,rh){
+  if(!circleRect(p.x,p.y,p.r,rx,ry,rw,rh)) return;
+  const cx=rx+rw/2, cy=ry+rh/2;
+  const ox=(rw/2+p.r)-Math.abs(p.x-cx);
+  const oy=(rh/2+p.r)-Math.abs(p.y-cy);
+  if(ox<oy) p.x+=ox*Math.sign(p.x-cx);
+  else      p.y+=oy*Math.sign(p.y-cy);
+}
+
+function pushMazeWalls(p){
+  const pc = Math.floor((p.x - OX)/CELL);
+  const pr = Math.floor((p.y - OY)/CELL);
+
+  for(let dr=-1; dr<=1; dr++){
+    for(let dc=-1; dc<=1; dc++){
+      const r=pr+dr, c=pc+dc;
+      if(r<0||r>=ROWS||c<0||c>=COLS) continue;
+      const pass = passage[r][c];
+      const x0=OX+c*CELL, y0=OY+r*CELL;
+
+      // North wall: solid if no passage north
+      if(!pass.n) pushOut(p, x0, y0, CELL, WT);
+      // South wall
+      if(!pass.s) pushOut(p, x0, y0+CELL-WT, CELL, WT);
+      // West wall
+      if(!pass.w) pushOut(p, x0, y0, WT, CELL);
+      // East wall
+      if(!pass.e) pushOut(p, x0+CELL-WT, y0, WT, CELL);
+    }
+  }
+  // hard outer boundary
+  p.x = Math.max(OX+p.r, Math.min(OX+COLS*CELL-p.r, p.x));
+  p.y = Math.max(OY+p.r, Math.min(OY+ROWS*CELL-p.r, p.y));
+}
+
+// ── PARTICLES ────────────────────────────────────────────────────
+function burst(x,y,col){
+  for(let i=0;i<18;i++){
+    const a=Math.random()*Math.PI*2, sp=1.5+Math.random()*4;
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+      life:1,decay:0.022+Math.random()*0.02,r:2+Math.random()*4,color:col});
+  }
+}
+
+// ── UPDATE ───────────────────────────────────────────────────────
+function update(dt){
+  S.elapsed += dt;
+  S.glowT   += dt;
+  const sec=Math.floor(S.elapsed);
+  document.getElementById('timer-display').textContent=
+    `⏱ ${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+
+  // traps move
+  S.traps.forEach(t=>{
+    t.x += t.vx||0;
+    t.y += t.vy||0;
+    if(t.minX!==undefined && (t.x<t.minX||t.x>t.maxX)) t.vx*=-1;
+    if(t.minY!==undefined && (t.y<t.minY||t.y>t.maxY)) t.vy*=-1;
+  });
+
+  const p=S.player;
+  if(p.dead){
+    p.deathTimer-=dt;
+    if(p.deathTimer<=0) showEnd(false);
+    particles.forEach(pt=>{pt.x+=pt.vx;pt.y+=pt.vy;pt.vx*=0.93;pt.vy*=0.93;pt.life-=pt.decay;});
+    particles=particles.filter(pt=>pt.life>0);
+    return;
+  }
+  if(p.won) return;
+
+  const {dx,dy}=inputDir();
+  p.x+=dx; p.y+=dy;
+  pushMazeWalls(p);
+
+  // reveal fog around player
+  const pc=Math.floor((p.x-OX)/CELL);
+  const pr=Math.floor((p.y-OY)/CELL);
+  for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++){
+    const rr=pr+dr, cc=pc+dc;
+    if(rr>=0&&rr<ROWS&&cc>=0&&cc<COLS) fog[rr][cc]=true;
+  }
+
+  // death by traps
+  for(const t of S.traps){
+    if(Math.hypot(p.x-t.x,p.y-t.y)<p.r+t.r){ die(); return; }
+  }
+
+  // win — reach bottom-right cell
+  const ec=cellCenter(ROWS-1, COLS-1);
+  if(Math.hypot(p.x-ec.x,p.y-ec.y)<CELL/2-4){
+    p.won=true;
+    burst(p.x,p.y,'#f1c40f');
+    burst(ec.x,ec.y,'#8e44ad');
+    showEnd(true);
+  }
+
+  particles.forEach(pt=>{pt.x+=pt.vx;pt.y+=pt.vy;pt.vx*=0.93;pt.vy*=0.93;pt.life-=pt.decay;});
+  particles=particles.filter(pt=>pt.life>0);
+}
+
+function die(){
+  const p=S.player;
+  if(p.dead) return;
+  p.dead=true; p.deathTimer=1.0;
+  burst(p.x,p.y,'#c0392b');
+}
+function showEnd(won){
+  const ov=document.getElementById('overlay');
+  ov.style.display='flex';
+  document.getElementById('overlay-msg').textContent=
+    won?'🔮 找到出口了！\n你太厉害了！':'💀 迷失在黑暗中…';
+  document.getElementById('restart-btn').style.display='block';
+  document.getElementById('back-btn').style.display='block';
+}
+function restartGame(){
+  S=initState();
+  particles=[];
+  lastTime=0;
+  document.getElementById('overlay').style.display='none';
+  document.getElementById('restart-btn').style.display='none';
+  document.getElementById('back-btn').style.display='none';
+  requestAnimationFrame(loop);
+}
+
+// ── DRAW ─────────────────────────────────────────────────────────
+function drawMaze(){
+  // dark background
+  ctx.fillStyle='#0a0414';
+  ctx.fillRect(0,0,W,H);
+
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const x0=OX+c*CELL, y0=OY+r*CELL;
+
+      if(!fog[r][c]){
+        // unrevealed: pitch black
+        ctx.fillStyle='rgba(4,2,10,0.97)';
+        ctx.fillRect(x0,y0,CELL,CELL);
+        continue;
+      }
+
+      // revealed floor
+      ctx.fillStyle='rgba(20,8,38,0.9)';
+      ctx.fillRect(x0,y0,CELL,CELL);
+
+      // draw walls for this cell
+      const pass = passage[r][c];
+      const jt = ()=>(Math.random()-0.5)*0.8;
+
+      ctx.strokeStyle='rgba(180,120,230,0.9)';
+      ctx.lineWidth=2.5;
+
+      if(!pass.n){
+        ctx.beginPath();
+        ctx.moveTo(x0+jt(),    y0+jt());
+        ctx.lineTo(x0+CELL+jt(),y0+jt());
+        ctx.stroke();
+      }
+      if(!pass.s){
+        ctx.beginPath();
+        ctx.moveTo(x0+jt(),     y0+CELL+jt());
+        ctx.lineTo(x0+CELL+jt(),y0+CELL+jt());
+        ctx.stroke();
+      }
+      if(!pass.w){
+        ctx.beginPath();
+        ctx.moveTo(x0+jt(),y0+jt());
+        ctx.lineTo(x0+jt(),y0+CELL+jt());
+        ctx.stroke();
+      }
+      if(!pass.e){
+        ctx.beginPath();
+        ctx.moveTo(x0+CELL+jt(),y0+jt());
+        ctx.lineTo(x0+CELL+jt(),y0+CELL+jt());
+        ctx.stroke();
+      }
+    }
+  }
+
+  // outer border
+  ctx.strokeStyle='rgba(180,120,230,0.95)';
+  ctx.lineWidth=3;
+  ctx.strokeRect(OX,OY,COLS*CELL,ROWS*CELL);
+
+  // START label
+  const sc=cellCenter(0,0);
+  ctx.fillStyle='rgba(80,200,80,0.8)';
+  ctx.font='bold 10px Courier New'; ctx.textAlign='center';
+  ctx.fillText('入口',sc.x,sc.y+4);
+
+  // END marker (only if revealed)
+  if(fog[ROWS-1][COLS-1]){
+    const ec=cellCenter(ROWS-1,COLS-1);
+    const pulse=0.5+0.4*Math.sin(S.glowT*3);
+    ctx.save();
+    ctx.globalAlpha=0.3+pulse*0.3;
+    ctx.fillStyle='#f1c40f';
+    ctx.fillRect(OX+(COLS-1)*CELL+2,OY+(ROWS-1)*CELL+2,CELL-4,CELL-4);
+    ctx.restore();
+    ctx.fillStyle='rgba(241,196,15,0.95)';
+    ctx.font='bold 11px Courier New'; ctx.textAlign='center';
+    ctx.fillText('出口',ec.x,ec.y+4);
+  }
+}
+
+function drawTraps(){
+  S.traps.forEach(t=>{
+    const c=Math.floor((t.x-OX)/CELL);
+    const r=Math.floor((t.y-OY)/CELL);
+    if(r<0||r>=ROWS||c<0||c>=COLS) return;
+    if(!fog[r][c]) return;
+    const pulse=0.6+0.4*Math.sin(S.glowT*5+t.x);
+    ctx.save();
+    ctx.shadowBlur=14; ctx.shadowColor='#8e44ad';
+    ctx.fillStyle=`rgba(160,80,220,${pulse})`;
+    ctx.beginPath(); ctx.arc(t.x,t.y,t.r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(220,160,255,0.9)';
+    ctx.lineWidth=1.5; ctx.stroke();
+    ctx.restore();
+  });
+}
+
+function drawPlayer(){
+  const p=S.player;
+  if(p.dead && Math.floor(p.deathTimer*12)%2===0) return;
+  ctx.save();
+  ctx.shadowBlur=14; ctx.shadowColor='#b084e8';
+  ctx.fillStyle=p.won?'rgba(241,196,15,0.95)':'rgba(220,190,255,0.95)';
+  ctx.strokeStyle='rgba(200,150,255,0.9)';
+  ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+  ctx.fill(); ctx.stroke();
+  // eye dot
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#2c0040';
+  ctx.beginPath(); ctx.arc(p.x+3,p.y-2,2.5,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawParticles(){
+  particles.forEach(pt=>{
+    ctx.globalAlpha=pt.life*0.85;
+    ctx.fillStyle=pt.color;
+    ctx.beginPath(); ctx.arc(pt.x,pt.y,pt.r*pt.life,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1;
+}
+
+function draw(){
+  drawMaze();
+  drawTraps();
+  drawPlayer();
+  drawParticles();
+}
+
+// ── LOOP ─────────────────────────────────────────────────────────
+function loop(ts){
+  const dt=lastTime?Math.min((ts-lastTime)/1000,0.05):0.016;
+  lastTime=ts;
+  const p=S.player;
+  const running=!(p.dead&&p.deathTimer<=0)&&!p.won;
+  update(dt);
+  draw();
+  if(running) requestAnimationFrame(loop);
+  else draw();
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
