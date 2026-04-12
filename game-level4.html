@@ -594,7 +594,9 @@ function submitScore(){
   const name=document.getElementById('name-input').value.trim()||'无名英雄';
   const all=JSON.parse(localStorage.getItem('son-game-scores')||'{}');
   if(!all[LEVEL_KEY]) all[LEVEL_KEY]=[];
-  all[LEVEL_KEY].push({name,time:S.elapsed});
+  const idx=all[LEVEL_KEY].findIndex(s=>s.name===name);
+  if(idx>=0){ if(S.elapsed<all[LEVEL_KEY][idx].time) all[LEVEL_KEY][idx].time=S.elapsed; }
+  else all[LEVEL_KEY].push({name,time:S.elapsed});
   all[LEVEL_KEY].sort((a,b)=>a.time-b.time);
   localStorage.setItem('son-game-scores',JSON.stringify(all));
   document.getElementById('name-entry').style.display='none';
