@@ -67,6 +67,16 @@ canvas { display: block; }
   display: none;
 }
 #restart-btn:hover { background: #ffe0a0; }
+#name-entry { display:none; flex-direction:column; align-items:center; gap:8px; margin-top:14px; }
+#final-time { font-size:14px; color:#5a3010; font-family:'Courier New',monospace; }
+.name-row { display:flex; gap:8px; align-items:center; }
+#name-input { padding:6px 10px; font-size:14px; font-family:'Courier New',monospace; border:2px solid #3a2a1a; background:#f5f0e8; color:#3a2a1a; width:150px; outline:none; }
+#save-score-btn { padding:6px 14px; font-size:13px; font-family:'Courier New',monospace; background:#f5f0e8; border:2px solid #3a2a1a; cursor:pointer; color:#3a2a1a; font-weight:bold; box-shadow:2px 2px 0 #3a2a1a; }
+#save-score-btn:hover { background:#ffe0a0; }
+#leaderboard { display:none; margin-top:10px; width:240px; font-family:'Courier New',monospace; border:1px solid #3a2a1a; background:rgba(245,240,220,0.9); padding:8px 10px; }
+#lb-title { font-weight:bold; font-size:12px; color:#5a3010; margin-bottom:6px; text-align:center; }
+.lb-row { display:flex; justify-content:space-between; padding:2px 4px; font-size:12px; color:#3a2a1a; }
+.lb-row:nth-child(even) { background:rgba(58,42,26,0.07); }
 #level3-btn, #level5-btn {
   margin-top: 10px; padding: 8px 22px;
   font-size: 13px; font-family: 'Courier New', monospace;
@@ -94,6 +104,17 @@ canvas { display: block; }
   <canvas id="canvas"></canvas>
   <div id="overlay">
     <div id="overlay-msg"></div>
+    <div id="name-entry">
+      <div id="final-time"></div>
+      <div class="name-row">
+        <input id="name-input" type="text" placeholder="输入名字" maxlength="10" onkeydown="if(event.key==='Enter')submitScore()">
+        <button id="save-score-btn" onclick="submitScore()">保存 ✓</button>
+      </div>
+    </div>
+    <div id="leaderboard">
+      <div id="lb-title">🏆 本关排行榜</div>
+      <div id="lb-rows"></div>
+    </div>
     <button id="restart-btn" onclick="restartGame()">重新开始</button>
     <a id="level5-btn" href="game-level5.html">→ 第五关</a>
     <a id="level3-btn" href="game-level3.html">← 返回第三关</a>
@@ -564,6 +585,29 @@ function die(){
   p.dead=true; p.deathTimer=1.0;
   burst(p.x,p.y,'#c0392b');
 }
+const LEVEL_KEY = 'level4';
+function fmtTime(secs){
+  const s=Math.floor(secs);
+  return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+}
+function submitScore(){
+  const name=document.getElementById('name-input').value.trim()||'无名英雄';
+  const all=JSON.parse(localStorage.getItem('son-game-scores')||'{}');
+  if(!all[LEVEL_KEY]) all[LEVEL_KEY]=[];
+  all[LEVEL_KEY].push({name,time:S.elapsed});
+  all[LEVEL_KEY].sort((a,b)=>a.time-b.time);
+  localStorage.setItem('son-game-scores',JSON.stringify(all));
+  document.getElementById('name-entry').style.display='none';
+  showLeaderboard(all[LEVEL_KEY]);
+}
+function showLeaderboard(scores){
+  const lb=document.getElementById('leaderboard');
+  lb.style.display='block';
+  const medals=['🥇','🥈','🥉','4.','5.'];
+  document.getElementById('lb-rows').innerHTML=scores.slice(0,5).map((s,i)=>
+    `<div class="lb-row"><span>${medals[i]||''} ${s.name}</span><span>${fmtTime(s.time)}</span></div>`
+  ).join('');
+}
 function showEnd(won){
   const ov=document.getElementById('overlay');
   ov.style.display='flex';
@@ -571,6 +615,10 @@ function showEnd(won){
   document.getElementById('overlay-msg').textContent = won?'🎉 第四关通关！':'💀 阵亡！再战！';
   document.getElementById('restart-btn').style.display='block';
   if(won){
+    document.getElementById('name-entry').style.display='flex';
+    document.getElementById('final-time').textContent='用时 '+fmtTime(S.elapsed);
+    const prev=(JSON.parse(localStorage.getItem('son-game-scores')||'{}')[LEVEL_KEY]||[]);
+    if(prev.length>0) showLeaderboard(prev);
     document.getElementById('level3-btn').style.display='block';
     document.getElementById('level5-btn').style.display='block';
   }
@@ -581,6 +629,9 @@ function restartGame(){
   lastTime=0;
   document.getElementById('overlay').style.display='none';
   document.getElementById('restart-btn').style.display='none';
+  document.getElementById('name-entry').style.display='none';
+  document.getElementById('leaderboard').style.display='none';
+  document.getElementById('name-input').value='';
   document.getElementById('level3-btn').style.display='none';
   document.getElementById('level5-btn').style.display='none';
   document.getElementById('timer-warning').style.display='none';
