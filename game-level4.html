@@ -291,7 +291,7 @@ let S = initState();
 // ─────────────────────────────────────────────────────────────────
 //  INPUT
 // ─────────────────────────────────────────────────────────────────
-document.addEventListener('keydown', e=>{ keys[e.key]=true; e.preventDefault(); });
+document.addEventListener('keydown', e=>{ keys[e.key]=true; if(e.target.tagName!=="INPUT") e.preventDefault(); });
 document.addEventListener('keyup',   e=>{ keys[e.key]=false; });
 function inputDir(){
   const SPD = 3.0;

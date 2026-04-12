@@ -151,7 +151,7 @@ function initState(){
 let S = initState();
 
 // ── Input ──
-document.addEventListener('keydown', e=>{ keys[e.key]=true; e.preventDefault(); });
+document.addEventListener('keydown', e=>{ keys[e.key]=true; if(e.target.tagName!=="INPUT") e.preventDefault(); });
 document.addEventListener('keyup',   e=>{ keys[e.key]=false; });
 
 // ── Collision ──
