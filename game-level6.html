@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>闯关游戏 · 第六关</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#c8b89a; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; font-family:'Courier New',monospace; }
+#ui { color:#3a2a1a; margin-bottom:8px; font-size:13px; display:flex; gap:16px; align-items:center; }
+#level-label { font-weight:bold; color:#5a3010; background:rgba(245,240,220,0.7); border:1px solid #3a2a1a; padding:2px 8px; }
+#level5-link { font-size:12px; color:#3a2a1a; background:rgba(245,240,220,0.7); border:1px solid #3a2a1a; padding:2px 8px; text-decoration:none; }
+#level5-link:hover { background:#ffe0a0; }
+#canvas-wrap { position:relative; box-shadow:4px 4px 18px rgba(0,0,0,0.4); }
+canvas { display:block; }
+#overlay { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; z-index:10; background:rgba(245,240,224,0.85); }
+#overlay-msg { font-size:34px; font-weight:bold; color:#3a2a1a; text-shadow:2px 2px 0 #fff,-1px -1px 0 #fff; font-family:'Courier New',monospace; text-align:center; }
+#restart-btn { margin-top:18px; padding:10px 28px; font-size:15px; font-family:'Courier New',monospace; background:#f5f0e8; border:2px solid #3a2a1a; cursor:pointer; color:#3a2a1a; font-weight:bold; box-shadow:3px 3px 0 #3a2a1a; display:none; }
+#restart-btn:hover { background:#ffe0a0; }
+#back-btn { margin-top:10px; padding:8px 22px; font-size:13px; font-family:'Courier New',monospace; background:#f5f0e8; border:2px solid #3a2a1a; cursor:pointer; color:#3a2a1a; box-shadow:3px 3px 0 #3a2a1a; display:none; text-decoration:none; }
+#back-btn:hover { background:#ffe0a0; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <span id="level-label">✏️ 第六关 · 传送门 + 气流</span>
+  <a id="level5-link" href="game-level5.html">← 第五关</a>
+  <span>WASD / 方向键 移动 &nbsp;|&nbsp; 进传送门瞬间移位！气流会推人！</span>
+  <span id="timer-display">⏱ 00:00</span>
+</div>
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <div id="overlay-msg"></div>
+    <button id="restart-btn" onclick="restartGame()">重新开始</button>
+    <a id="back-btn" href="game-level5.html">← 回到第五关</a>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+const W = 900, H = 560;
+canvas.width = W; canvas.height = H;
+const WALL = 10;
+
+// ── Paper texture ──
+const paperCanvas = document.createElement('canvas');
+paperCanvas.width = W; paperCanvas.height = H;
+const pctx = paperCanvas.getContext('2d');
+pctx.fillStyle = '#f5f0e0'; pctx.fillRect(0,0,W,H);
+pctx.strokeStyle = 'rgba(150,180,220,0.35)'; pctx.lineWidth = 0.8;
+for(let y=30;y<H;y+=28){ pctx.beginPath(); pctx.moveTo(0,y); pctx.lineTo(W,y); pctx.stroke(); }
+pctx.strokeStyle = 'rgba(220,130,130,0.4)'; pctx.lineWidth = 1;
+pctx.beginPath(); pctx.moveTo(55,0); pctx.lineTo(55,H); pctx.stroke();
+for(let i=0;i<4000;i++){
+  const x=Math.random()*W, y=Math.random()*H;
+  pctx.fillStyle=`rgba(120,80,40,${Math.random()*0.06})`; pctx.fillRect(x,y,1,1);
+}
+
+// ── Sketch helpers ──
+function sketchLine(x1,y1,x2,y2,p=2){
+  for(let i=0;i<p;i++){
+    const j=()=>(Math.random()-0.5)*1.4;
+    ctx.beginPath(); ctx.moveTo(x1+j(),y1+j()); ctx.lineTo(x2+j(),y2+j()); ctx.stroke();
+  }
+}
+function sketchRect(x,y,w,h,p=2){
+  sketchLine(x,y,x+w,y,p); sketchLine(x+w,y,x+w,y+h,p);
+  sketchLine(x+w,y+h,x,y+h,p); sketchLine(x,y+h,x,y,p);
+}
+function setInk(c='#1a0e05',w=1.8){ ctx.strokeStyle=c; ctx.lineWidth=w; ctx.fillStyle=c; }
+
+// ── Solid middle barrier (only passable via portals) ──
+const BARRIER = { x:WALL, y:252, w:W-2*WALL, h:13 };
+
+// ── Wind zones ──
+// 顶部向下气流：超过玩家速度，必须斜着冲或卡时机
+const windZones = [
+  { x:WALL, y:WALL, w:W-2*WALL, h:215, fx:0, fy:+2.5, dir:'↓' },
+];
+
+// ── Portal pairs ──
+const PORTAL_R = 20;
+const portals = [
+  { color:'#8e44ad', label:'★', a:{x:200,y:420}, b:{x:680,y:185} },
+];
+
+// ── State ──
+let keys={}, particles=[], lastTime=0, globalT=0;
+let hintMsg='', hintTimer=0;
+
+function initState(){
+  return {
+    elapsed:0,
+    player:{ x:750, y:490, r:9, dead:false, won:false, deathTimer:0, tpCool:0 },
+
+    // Blade A: guards portal entrance
+    bladeA:{ x:200, y:350, armR:54, angle:0,           spd: 0.100 },
+    // Blade B: new, guards path between start and portal
+    bladeB:{ x:560, y:390, armR:48, angle:Math.PI/3,   spd:-0.085 },
+
+    // Two arms flanking portal approach
+    armC:{ x:480, y:410, len:88, w:13, angle:0.5,      spd: 0.034 },
+    armC2:{ x:340, y:460, len:72, w:12, angle:Math.PI, spd:-0.038 },
+
+    // Two arms straddling the natural path (portal exit → top center exit)
+    armT:{ x:520, y:120, len:82, w:12, angle:1.1,  spd: 0.056 },
+    armT2:{ x:370, y:80,  len:72, w:11, angle:2.5, spd:-0.052 },
+
+    // Moving gears — sweep wider to cover most of the corridor
+    gears:[
+      { x:450, y:148, outerR:42, teeth:10, angle:0,   angSpd:0.025,
+        baseX:450, moveRange:480, moveSpd:1.4, phase:0 },
+      { x:450, y:90,  outerR:36, teeth:9,  angle:1.2, angSpd:-0.030,
+        baseX:450, moveRange:400, moveSpd:1.7, phase:Math.PI },
+    ],
+
+    // Wall spikes on both sides — block edge-hugging
+    wsL:{ x:WALL+8,   y:125, dir:'right', count:3, spikeLen:48, baseW:8,
+          extended:false, timer:0,   period:1.9, duty:0.50 },
+    wsR:{ x:W-WALL-8, y:82,  dir:'left',  count:3, spikeLen:260, baseW:8,
+          extended:false, timer:0.95, period:1.9, duty:0.50 },
+
+    pulse:{ on:false },   // removed
+    pulse2:{ on:false },  // removed
+
+    exitBox:{ x:430, y:WALL, w:40, h:40 },
+  };
+}
+let S = initState();
+
+// ── Input ──
+document.addEventListener('keydown', e=>{ keys[e.key]=true; e.preventDefault(); });
+document.addEventListener('keyup',   e=>{ keys[e.key]=false; });
+
+// ── Collision ──
+function pushOut(p,rx,ry,rw,rh){
+  if(!circleRect(p.x,p.y,p.r,rx,ry,rw,rh)) return;
+  const cx=rx+rw/2,cy=ry+rh/2;
+  const ox=(rw/2+p.r)-Math.abs(p.x-cx);
+  const oy=(rh/2+p.r)-Math.abs(p.y-cy);
+  if(ox<oy) p.x+=ox*Math.sign(p.x-cx);
+  else      p.y+=oy*Math.sign(p.y-cy);
+}
+function circleRect(cx,cy,cr,rx,ry,rw,rh){
+  const nx=Math.max(rx,Math.min(cx,rx+rw));
+  const ny=Math.max(ry,Math.min(cy,ry+rh));
+  return (cx-nx)**2+(cy-ny)**2<cr*cr;
+}
+function circleLine(cx,cy,cr,x1,y1,x2,y2){
+  const ddx=x2-x1,ddy=y2-y1,len2=ddx*ddx+ddy*ddy;
+  if(len2===0) return Math.hypot(cx-x1,cy-y1)<cr;
+  const t=Math.max(0,Math.min(1,((cx-x1)*ddx+(cy-y1)*ddy)/len2));
+  return (cx-x1-t*ddx)**2+(cy-y1-t*ddy)**2<cr*cr;
+}
+
+// ── Particles ──
+function burst(x,y,col,n=18){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2,sp=1.5+Math.random()*5;
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,
+      life:1,decay:0.02+Math.random()*0.025,r:2+Math.random()*4,color:col});
+  }
+}
+
+// ── Portal teleport ──
+function tryTeleport(p){
+  if(p.tpCool>0) return;
+  for(const pp of portals){
+    for(const [from,to] of [[pp.a,pp.b],[pp.b,pp.a]]){
+      if(Math.hypot(p.x-from.x,p.y-from.y)<PORTAL_R+p.r-3){
+        burst(from.x,from.y,pp.color,28);
+        p.x=to.x; p.y=to.y;
+        p.tpCool=0.8;
+        burst(to.x,to.y,pp.color,28);
+        hintMsg='✨ 传送！'; hintTimer=1.2;
+        return;
+      }
+    }
+  }
+}
+
+// ── Wind ──
+function applyWind(p){
+  for(const wz of windZones){
+    if(p.x>wz.x&&p.x<wz.x+wz.w&&p.y>wz.y&&p.y<wz.y+wz.h){
+      p.x+=wz.fx; p.y+=wz.fy;
+    }
+  }
+  p.x=Math.max(p.r+WALL,Math.min(W-p.r-WALL,p.x));
+  p.y=Math.max(p.r+WALL,Math.min(H-p.r-WALL,p.y));
+}
+
+// ── Update ──
+function update(dt){
+  S.elapsed+=dt; globalT+=dt;
+  const sec=Math.floor(S.elapsed);
+  document.getElementById('timer-display').textContent=
+    `⏱ ${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
+
+  if(hintTimer>0) hintTimer-=dt;
+  if(S.player.tpCool>0) S.player.tpCool-=dt;
+
+  S.armC.angle+=S.armC.spd;
+  S.armC2.angle+=S.armC2.spd;
+  S.armT.angle+=S.armT.spd;
+  S.armT2.angle+=S.armT2.spd;
+  S.wsL.timer+=dt; S.wsL.extended=(S.wsL.timer%S.wsL.period)<S.wsL.period*S.wsL.duty;
+  S.wsR.timer+=dt; S.wsR.extended=(S.wsR.timer%S.wsR.period)<S.wsR.period*S.wsR.duty;
+  S.gears.forEach(g=>{
+    g.angle+=g.angSpd;
+    g.phase+=g.moveSpd*dt;
+    g.x=g.baseX+Math.sin(g.phase)*g.moveRange/2;
+  });
+  S.bladeA.angle+=S.bladeA.spd;
+  S.bladeB.angle+=S.bladeB.spd;
+
+  // Death handling
+  const p=S.player;
+  if(p.dead){
+    p.deathTimer-=dt;
+    if(p.deathTimer<=0) showEnd(false);
+    particles.forEach(pt=>{pt.x+=pt.vx;pt.y+=pt.vy;pt.vx*=0.93;pt.vy*=0.93;pt.life-=pt.decay;});
+    particles=particles.filter(pt=>pt.life>0);
+    return;
+  }
+  if(p.won) return;
+
+  // Move (WASD + Arrow keys)
+  const spd=3.0;
+  if(keys['a']||keys['A']||keys['ArrowLeft'])  p.x-=spd;
+  if(keys['d']||keys['D']||keys['ArrowRight']) p.x+=spd;
+  if(keys['w']||keys['W']||keys['ArrowUp'])    p.y-=spd;
+  if(keys['s']||keys['S']||keys['ArrowDown'])  p.y+=spd;
+  p.x=Math.max(p.r+WALL,Math.min(W-p.r-WALL,p.x));
+  p.y=Math.max(p.r+WALL,Math.min(H-p.r-WALL,p.y));
+  pushOut(p,BARRIER.x,BARRIER.y,BARRIER.w,BARRIER.h);  // solid wall — portals are the only way through
+  applyWind(p);
+  tryTeleport(p);
+
+  // Blades guarding portals
+  for(const bl of [S.bladeA, S.bladeB]){
+    for(let i=0;i<4;i++){
+      const a=bl.angle+i*Math.PI/2;
+      const tx=bl.x+Math.cos(a)*bl.armR, ty=bl.y+Math.sin(a)*bl.armR;
+      if(!p.dead&&circleLine(p.x,p.y,p.r,bl.x,bl.y,tx,ty)) dieP(p,'#c0392b');
+    }
+  }
+  // Center arms
+  for(const arm of [S.armC, S.armC2, S.armT2]){
+    const tx=arm.x+Math.cos(arm.angle)*arm.len, ty=arm.y+Math.sin(arm.angle)*arm.len;
+    if(!p.dead&&circleLine(p.x,p.y,p.r+4,arm.x,arm.y,tx,ty)) dieP(p,'#c0392b');
+  }
+  // Top arm
+  { const a=S.armT,tx=a.x+Math.cos(a.angle)*a.len,ty=a.y+Math.sin(a.angle)*a.len;
+    if(!p.dead&&circleLine(p.x,p.y,p.r+4,a.x,a.y,tx,ty)) dieP(p,'#c0392b'); }
+  // Wall spikes
+  for(const ws of [S.wsL, S.wsR]){
+    if(!p.dead && ws.extended){
+      const rx = ws.dir==='right' ? ws.x : ws.x-ws.spikeLen-ws.baseW;
+      const ry = ws.y - ws.count*(ws.baseW+2)/2;
+      const rw = ws.spikeLen+ws.baseW, rh = ws.count*(ws.baseW+2);
+      if(circleRect(p.x,p.y,p.r,rx,ry,rw,rh)) dieP(p,'#c0392b');
+    }
+  }
+  // Gears
+  if(!p.dead) S.gears.forEach(g=>{
+    if(Math.hypot(p.x-g.x,p.y-g.y)<g.outerR*0.65+p.r){ dieP(p,'#c0392b'); return; }
+    for(let i=0;i<g.teeth;i++){
+      const a=g.angle+(i/g.teeth)*Math.PI*2;
+      if(Math.hypot(p.x-g.x-Math.cos(a)*g.outerR, p.y-g.y-Math.sin(a)*g.outerR)<p.r+5)
+        dieP(p,'#c0392b');
+    }
+  });
+
+  // Exit
+  if(!p.dead){
+    const eb=S.exitBox;
+    if(p.x>eb.x&&p.x<eb.x+eb.w&&p.y>eb.y&&p.y<eb.y+eb.h){
+      p.won=true;
+      burst(p.x,p.y,'#f1c40f',25);
+      showEnd(true);
+    }
+  }
+
+  particles.forEach(pt=>{pt.x+=pt.vx;pt.y+=pt.vy;pt.vx*=0.93;pt.vy*=0.93;pt.life-=pt.decay;});
+  particles=particles.filter(pt=>pt.life>0);
+}
+
+function dieP(p,col){
+  if(p.dead) return;
+  p.dead=true; p.deathTimer=1.0;
+  burst(p.x,p.y,col,22);
+}
+function showEnd(won){
+  document.getElementById('overlay').style.display='flex';
+  document.getElementById('overlay-msg').textContent=won?'🎉 通关！太厉害了！':'💀 阵亡！再战！';
+  document.getElementById('restart-btn').style.display='block';
+  if(won) document.getElementById('back-btn').style.display='block';
+}
+function restartGame(){
+  S=initState(); particles=[]; lastTime=0; globalT=0; hintMsg=''; hintTimer=0;
+  document.getElementById('overlay').style.display='none';
+  document.getElementById('restart-btn').style.display='none';
+  document.getElementById('back-btn').style.display='none';
+  requestAnimationFrame(loop);
+}
+
+// ──────────────────────────────────────────────
+//  DRAW
+// ──────────────────────────────────────────────
+
+function drawWindZone(wz){
+  // Background tint
+  ctx.save(); ctx.globalAlpha=0.09;
+  ctx.fillStyle='#4fc3f7'; ctx.fillRect(wz.x,wz.y,wz.w,wz.h);
+  ctx.globalAlpha=1; ctx.restore();
+
+  // Dashed border
+  ctx.strokeStyle='rgba(70,150,210,0.35)'; ctx.lineWidth=1.3;
+  ctx.setLineDash([7,5]);
+  ctx.beginPath(); ctx.rect(wz.x,wz.y,wz.w,wz.h); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Static arrows
+  ctx.strokeStyle='rgba(50,130,200,0.50)'; ctx.lineWidth=1.6;
+  if(wz.fx!==0){
+    for(let ay=wz.y+22;ay<wz.y+wz.h-8;ay+=34){
+      for(let ax=wz.x+10;ax<wz.x+wz.w-10;ax+=46){
+        const ex=ax+34*Math.sign(wz.fx);
+        if(ex<wz.x||ex>wz.x+wz.w) continue;
+        ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(ex,ay); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ex,ay); ctx.lineTo(ex-9*Math.sign(wz.fx),ay-4);
+        ctx.moveTo(ex,ay); ctx.lineTo(ex-9*Math.sign(wz.fx),ay+4);
+        ctx.stroke();
+      }
+    }
+  } else {
+    for(let ax=wz.x+22;ax<wz.x+wz.w-8;ax+=44){
+      for(let ay=wz.y+10;ay<wz.y+wz.h-10;ay+=46){
+        const ey=ay+34*Math.sign(wz.fy);
+        if(ey<wz.y||ey>wz.y+wz.h) continue;
+        ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(ax,ey); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(ax,ey); ctx.lineTo(ax-4,ey-9*Math.sign(wz.fy));
+        ctx.moveTo(ax,ey); ctx.lineTo(ax+4,ey-9*Math.sign(wz.fy));
+        ctx.stroke();
+      }
+    }
+  }
+
+  // Label
+  ctx.fillStyle='rgba(20,90,170,0.55)';
+  ctx.font='bold 11px Courier New'; ctx.textAlign='center';
+  ctx.fillText(wz.dir+' 气流', wz.x+wz.w/2, wz.y+wz.h/2+4);
+}
+
+function drawPortals(){
+  // Draw crossing connection lines first (behind portals)
+  for(const pp of portals){
+    ctx.strokeStyle=pp.color+'55'; ctx.lineWidth=1.5; ctx.setLineDash([8,6]);
+    ctx.beginPath(); ctx.moveTo(pp.a.x,pp.a.y); ctx.lineTo(pp.b.x,pp.b.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const t=globalT;
+  for(const pp of portals){
+    for(const pt of [pp.a,pp.b]){
+      const pulse=0.6+0.4*Math.sin(t*4.5);
+
+      // Outer glow ring
+      ctx.save();
+      ctx.shadowColor=pp.color; ctx.shadowBlur=18*pulse;
+      ctx.strokeStyle=pp.color; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.arc(pt.x,pt.y,PORTAL_R,0,Math.PI*2); ctx.stroke();
+      ctx.restore();
+
+      // Spinning dots
+      ctx.save(); ctx.translate(pt.x,pt.y); ctx.rotate(t*2.2);
+      for(let i=0;i<6;i++){
+        const a=(i/6)*Math.PI*2;
+        ctx.beginPath();
+        ctx.arc(Math.cos(a)*(PORTAL_R-6),Math.sin(a)*(PORTAL_R-6),2.5,0,Math.PI*2);
+        ctx.fillStyle=pp.color; ctx.fill();
+      }
+      ctx.restore();
+
+      // Inner fill gradient
+      const grad=ctx.createRadialGradient(pt.x,pt.y,0,pt.x,pt.y,PORTAL_R-4);
+      grad.addColorStop(0,pp.color+'99');
+      grad.addColorStop(1,pp.color+'18');
+      ctx.beginPath(); ctx.arc(pt.x,pt.y,PORTAL_R-4,0,Math.PI*2);
+      ctx.fillStyle=grad; ctx.fill();
+
+      // Label
+      ctx.fillStyle='#fff'; ctx.font='bold 12px Courier New'; ctx.textAlign='center';
+      ctx.fillText(pp.label,pt.x,pt.y+4);
+    }
+  }
+}
+
+function drawBlade(bl){
+  ctx.save(); ctx.translate(bl.x,bl.y); ctx.rotate(bl.angle);
+  setInk('#1a0e05',1.6);
+  for(let i=0;i<4;i++){
+    ctx.save(); ctx.rotate(i*Math.PI/2);
+    ctx.beginPath(); ctx.moveTo(0,-3); ctx.lineTo(bl.armR,0); ctx.lineTo(0,3);
+    ctx.closePath();
+    ctx.fillStyle='rgba(160,140,100,0.7)'; ctx.fill();
+    setInk('#1a0e05',1.5); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+  ctx.restore();
+}
+
+function drawArm(arm){
+  ctx.save(); ctx.translate(arm.x,arm.y); ctx.rotate(arm.angle);
+  const hw=arm.w/2;
+  ctx.beginPath(); ctx.rect(0,-hw,arm.len,arm.w);
+  ctx.fillStyle='rgba(145,115,65,0.88)'; ctx.fill();
+  setInk('#1a0e05',2.2); sketchRect(0,-hw,arm.len,arm.w,3);
+  for(let rx=22;rx<arm.len-8;rx+=22){
+    ctx.beginPath(); ctx.arc(rx,0,2.6,0,Math.PI*2);
+    ctx.fillStyle='rgba(200,170,110,0.85)'; ctx.fill();
+    setInk('#1a0e05',0.9); ctx.stroke();
+  }
+  ctx.fillStyle='rgba(80,58,28,0.92)';
+  ctx.fillRect(arm.len-10,-hw-2,12,arm.w+4);
+  setInk('#1a0e05',1.5); sketchRect(arm.len-10,-hw-2,12,arm.w+4,2);
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(arm.x,arm.y,8,0,Math.PI*2);
+  ctx.fillStyle='rgba(65,48,28,0.95)'; ctx.fill();
+  setInk('#1a0e05',1.8); ctx.stroke();
+}
+
+function drawPulse(pz){
+  const {x,y,w,h,on}=pz;
+  const seg=14,steps=Math.floor(w/seg);
+  ctx.beginPath(); ctx.moveTo(x,y+h/2);
+  for(let i=0;i<=steps;i++) ctx.lineTo(x+i*seg,y+(i%2===0?0:h));
+  if(on){
+    ctx.save();
+    ctx.shadowColor='#e74c3c'; ctx.shadowBlur=10;
+    ctx.strokeStyle='#e74c3c'; ctx.lineWidth=2.5; ctx.stroke();
+    ctx.restore();
+  } else {
+    ctx.strokeStyle='rgba(50,35,20,0.38)'; ctx.lineWidth=1.2;
+    ctx.setLineDash([5,4]); ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+function drawPlayer(p){
+  if(p.dead&&Math.floor(p.deathTimer*12)%2===0) return;
+  ctx.save(); ctx.translate(p.x,p.y);
+  setInk('#1a0e05',2);
+  ctx.beginPath(); ctx.arc(0,0,p.r,0,Math.PI*2);
+  ctx.fillStyle=p.won?'rgba(220,200,80,0.95)':'rgba(200,230,230,0.92)';
+  ctx.fill(); ctx.stroke();
+
+  ctx.beginPath(); ctx.arc(2,-1,p.r*0.5,0,Math.PI*2);
+  ctx.fillStyle='rgba(100,180,200,0.55)';
+  ctx.fill(); setInk('#1a0e05',1); ctx.stroke();
+
+  ctx.beginPath(); ctx.arc(3,-1,2.4,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+
+  setInk('rgba(200,120,20,0.8)',1.5);
+  const thrx=-p.r-2;
+  ctx.beginPath();
+  ctx.moveTo(thrx,0);
+  ctx.quadraticCurveTo(thrx-5,-4,thrx-8+Math.random()*4,-2+Math.random()*4);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawGear(g){
+  const {x,y,outerR,teeth,angle}=g;
+  const innerR=outerR*0.62;
+  ctx.save(); ctx.translate(x,y);
+  ctx.beginPath();
+  for(let i=0;i<teeth;i++){
+    const a0=(i/teeth)*Math.PI*2+angle, a1=((i+0.3)/teeth)*Math.PI*2+angle;
+    const a2=((i+0.7)/teeth)*Math.PI*2+angle, a3=((i+1)/teeth)*Math.PI*2+angle;
+    if(i===0) ctx.moveTo(Math.cos(a0)*innerR,Math.sin(a0)*innerR);
+    else ctx.lineTo(Math.cos(a0)*innerR,Math.sin(a0)*innerR);
+    ctx.lineTo(Math.cos(a1)*outerR,Math.sin(a1)*outerR);
+    ctx.lineTo(Math.cos(a2)*outerR,Math.sin(a2)*outerR);
+    ctx.lineTo(Math.cos(a3)*innerR,Math.sin(a3)*innerR);
+  }
+  ctx.closePath();
+  ctx.fillStyle='rgba(180,160,120,0.55)'; ctx.fill();
+  setInk('#1a0e05',1.8); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0,0,innerR,0,Math.PI*2);
+  ctx.fillStyle='rgba(200,185,145,0.5)'; ctx.fill();
+  setInk('#1a0e05',1.4); ctx.stroke();
+  setInk('#1a0e05',1.2);
+  for(let i=0;i<4;i++){
+    const a=angle+i*Math.PI/2;
+    sketchLine(0,0,Math.cos(a)*innerR*0.85,Math.sin(a)*innerR*0.85);
+  }
+  ctx.beginPath(); ctx.arc(0,0,outerR*0.13,0,Math.PI*2);
+  ctx.fillStyle='#1a0e05'; ctx.fill();
+  ctx.restore();
+}
+
+function drawWallSpike(ws){
+  const totalH=ws.count*(ws.baseW+2);
+  const plateY=ws.y-totalH/2;
+  const sign = ws.dir==='right' ? 1 : -1;
+  const plateX = ws.dir==='right' ? ws.x-ws.baseW : ws.x;
+  ctx.fillStyle='rgba(70,50,28,0.90)';
+  ctx.fillRect(plateX,plateY,ws.baseW,totalH);
+  setInk('#1a0e05',1.8); sketchRect(plateX,plateY,ws.baseW,totalH,2);
+  if(ws.extended){
+    ctx.save();
+    ctx.shadowColor='#c0392b'; ctx.shadowBlur=12;
+    for(let i=0;i<ws.count;i++){
+      const cy=plateY+i*(ws.baseW+2)+(ws.baseW+2)/2;
+      const baseX = ws.dir==='right' ? ws.x : ws.x;
+      ctx.beginPath();
+      ctx.moveTo(baseX,cy-ws.baseW/2); ctx.lineTo(baseX,cy+ws.baseW/2);
+      ctx.lineTo(baseX+sign*ws.spikeLen,cy);
+      ctx.closePath();
+      ctx.fillStyle='rgba(35,22,10,0.90)'; ctx.fill();
+      setInk('#1a0e05',1.1); ctx.stroke();
+    }
+    ctx.restore();
+  } else {
+    for(let i=0;i<ws.count;i++){
+      const cy=plateY+i*(ws.baseW+2)+(ws.baseW+2)/2;
+      ctx.beginPath();
+      ctx.moveTo(ws.x,cy-ws.baseW*0.3); ctx.lineTo(ws.x,cy+ws.baseW*0.3);
+      ctx.lineTo(ws.x+sign*6,cy);
+      ctx.closePath();
+      ctx.fillStyle='rgba(60,42,20,0.40)'; ctx.fill();
+    }
+  }
+}
+
+function draw(){
+  ctx.drawImage(paperCanvas,0,0);
+
+  // Outer walls
+  ctx.fillStyle='rgba(60,45,25,0.92)';
+  ctx.fillRect(0,0,W,WALL); ctx.fillRect(0,H-WALL,W,WALL);
+  ctx.fillRect(0,0,WALL,H); ctx.fillRect(W-WALL,0,WALL,H);
+  setInk('#1a0e05',2.5); sketchRect(0,0,W,H,3);
+
+  // Wind zones (draw first, behind everything)
+  windZones.forEach(drawWindZone);
+
+  // Solid barrier (middle wall)
+  ctx.fillStyle='rgba(55,40,20,0.88)';
+  ctx.fillRect(BARRIER.x,BARRIER.y,BARRIER.w,BARRIER.h);
+  setInk('#1a0e05',2.2); sketchRect(BARRIER.x,BARRIER.y,BARRIER.w,BARRIER.h,3);
+  // Hatching to signal "solid"
+  ctx.strokeStyle='rgba(30,20,8,0.30)'; ctx.lineWidth=1;
+  for(let hx=BARRIER.x+8;hx<BARRIER.x+BARRIER.w;hx+=14){
+    ctx.beginPath(); ctx.moveTo(hx,BARRIER.y); ctx.lineTo(hx-BARRIER.h,BARRIER.y+BARRIER.h); ctx.stroke();
+  }
+
+  // Portal connection lines + portal circles
+  drawPortals();
+
+  // Blades guarding portals
+  drawBlade(S.bladeA);
+  drawBlade(S.bladeB);
+  // Arms
+  drawArm(S.armC);
+  drawArm(S.armC2);
+  S.gears.forEach(drawGear);
+  drawArm(S.armT);
+  drawArm(S.armT2);
+  drawWallSpike(S.wsL);
+  drawWallSpike(S.wsR);
+
+  // Pulse zone
+
+  // Start box
+  { const bx=730,by=H-WALL-40,bw=40,bh=40;
+    ctx.fillStyle='rgba(80,180,80,0.22)'; ctx.fillRect(bx,by,bw,bh);
+    setInk('#2a6a2a',2); sketchRect(bx,by,bw,bh,2);
+    ctx.fillStyle='rgba(30,110,30,0.75)'; ctx.font='bold 9px Courier New'; ctx.textAlign='center';
+    ctx.fillText('START',bx+bw/2,by+bh/2+3);
+  }
+
+  // Exit box
+  const eb=S.exitBox;
+  const anyWon=S.player.won;
+  ctx.fillStyle=anyWon?'rgba(80,200,80,0.50)':'rgba(80,180,80,0.22)';
+  ctx.fillRect(eb.x,eb.y,eb.w,eb.h);
+  setInk(anyWon?'#2a7a2a':'#2a6a2a',2); sketchRect(eb.x,eb.y,eb.w,eb.h,2);
+  ctx.fillStyle=anyWon?'rgba(30,120,30,0.9)':'rgba(30,110,30,0.75)';
+  ctx.font='bold 9px Courier New'; ctx.textAlign='center';
+  ctx.fillText('EXIT',eb.x+eb.w/2,eb.y+eb.h/2+3);
+
+  // Player
+  drawPlayer(S.player);
+
+  // Particles
+  particles.forEach(pt=>{
+    ctx.save(); ctx.globalAlpha=pt.life;
+    ctx.beginPath(); ctx.arc(pt.x,pt.y,pt.r,0,Math.PI*2);
+    ctx.fillStyle=pt.color; ctx.fill();
+    ctx.restore();
+  });
+
+
+  // Hint message
+  if(hintTimer>0){
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,hintTimer);
+    ctx.fillStyle='rgba(40,24,8,0.90)';
+    ctx.font='bold 18px Courier New'; ctx.textAlign='center';
+    ctx.fillText(hintMsg,W/2,H/2-10);
+    ctx.restore();
+  }
+}
+
+// ── Game loop ──
+function loop(ts){
+  if(!lastTime) lastTime=ts;
+  const dt=Math.min((ts-lastTime)/1000,0.05);
+  lastTime=ts;
+  update(dt);
+  draw();
+  if(!(S.player.dead&&S.player.deathTimer<=0)){
+    requestAnimationFrame(loop);
+  }
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
