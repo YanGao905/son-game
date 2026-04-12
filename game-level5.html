@@ -67,14 +67,14 @@ canvas { display: block; }
   pointer-events: all; box-shadow: 3px 3px 0 #3a2a1a; display: none;
 }
 #restart-btn:hover { background: #ffe0a0; }
-#level4-btn {
+#level4-btn, #level6-btn {
   margin-top: 10px; padding: 8px 22px;
   font-size: 13px; font-family: 'Courier New', monospace;
   background: #f5f0e8; border: 2px solid #3a2a1a;
   cursor: pointer; color: #3a2a1a; pointer-events: all;
   box-shadow: 3px 3px 0 #3a2a1a; display: none; text-decoration: none;
 }
-#level4-btn:hover { background: #ffe0a0; }
+#level4-btn:hover, #level6-btn:hover { background: #ffe0a0; }
 </style>
 </head>
 <body>
@@ -93,6 +93,7 @@ canvas { display: block; }
   <div id="overlay">
     <div id="overlay-msg"></div>
     <button id="restart-btn" onclick="restartGame()">重新开始</button>
+    <a id="level6-btn" href="game-level6.html">进入第六关 →</a>
     <a id="level4-btn" href="game-level4.html">← 返回第四关</a>
   </div>
 </div>
@@ -443,14 +444,15 @@ function die(){
 function showEnd(won){
   const ov=document.getElementById('overlay');
   ov.style.display='flex';
-  document.getElementById('overlay-msg').textContent=won?'🎉 全部通关！你是天才！':'💀 阵亡！再战！';
+  document.getElementById('overlay-msg').textContent=won?'🎉 第五关通关！继续冲！':'💀 阵亡！再战！';
   document.getElementById('restart-btn').style.display='block';
-  if(won) document.getElementById('level4-btn').style.display='block';
+  if(won) document.getElementById('level6-btn').style.display='block';
 }
 function restartGame(){
   S=initState(); particles=[]; lastTime=0; hintMsg=''; hintTimer=0;
   document.getElementById('overlay').style.display='none';
   document.getElementById('restart-btn').style.display='none';
+  document.getElementById('level6-btn').style.display='none';
   document.getElementById('level4-btn').style.display='none';
   document.getElementById('inventory').textContent='背包：空';
   requestAnimationFrame(loop);
