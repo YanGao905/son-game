@@ -193,7 +193,7 @@ function applyWind(p){
 
 // ── Update ──
 function update(dt){
-  S.elapsed+=dt; globalT+=dt;
+  if(!S.player.won && !S.player.dead) S.elapsed+=dt; globalT+=dt;
   const sec=Math.floor(S.elapsed);
   document.getElementById('timer-display').textContent=
     `⏱ ${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;
